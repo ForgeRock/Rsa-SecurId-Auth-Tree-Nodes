@@ -23,12 +23,12 @@
     <artifactId>RSASecurId</artifactId>
 
     <groupId>org.forgerock.am</groupId>
-    <version>1.0.2</version>
+    <version>1.0.6</version>
     <name>RSASecurID</name>
     <description>An Authentication Tree Node RSA SecurID</description>
 
     <properties>
-        <am.version>7.0.0</am.version>
+        <am.version>LATEST</am.version>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
