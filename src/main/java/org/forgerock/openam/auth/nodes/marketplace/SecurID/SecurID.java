@@ -156,7 +156,6 @@ public class SecurID extends AbstractDecisionNode {
 
 				// check if they hit cancel button first.
 				if (cancelPushed(context, ns)) {
-					// TODO clean shared state
 					cleanSS(ns);
 					return Action.goTo(CANCEL).build();
 				}
@@ -186,6 +185,15 @@ public class SecurID extends AbstractDecisionNode {
 					return checkApproval(ns, 3, ns.get("p1Choice").asString());
 
 				case 4:// they went with Voice or SMS
+					result = checkToken(context);
+					if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {
+						cleanSS(ns);
+						return Action.goTo(SUCCESS).build();
+					} else {
+						// TODO if here, then they failed token match. Give another chance? For now, I'm sending to failure
+						cleanSS(ns);
+						return Action.goTo(FAILURE).build();
+					} 
 				}
 
 				// TODO how do we test if Not Supported?
@@ -307,6 +315,10 @@ public class SecurID extends AbstractDecisionNode {
 			theBody.add("subjectCredentials", getSubCred("SECURID", token));
 		else if (theChoice.equalsIgnoreCase("Authenticate Tokencode"))
 			theBody.add("subjectCredentials", getSubCred("TOKEN", token));
+		else if (theChoice.equalsIgnoreCase("Voice Tokencode"))
+			theBody.add("subjectCredentials", getSubCred("VOICE", token));
+		else if (theChoice.equalsIgnoreCase("SMS Tokencode"))
+			theBody.add("subjectCredentials", getSubCred("SMS", token));
 
 		post.setEntity(new StringEntity(theBody.toString()));
 
@@ -357,7 +369,41 @@ public class SecurID extends AbstractDecisionNode {
 			// need to show them a QR code and a wait till done
 			callbacks.addAll(pushSetup(theChoice, ns, 3));
 			break;
+			
+		case "Voice Tokencode":
+		case "SMS Tokencode":
+			callbacks.addAll(vOrSSetup(theChoice, ns, 4));
+			break;
 		}
+		return callbacks;
+	}
+	
+	private List<Callback> vOrSSetup(String theChoice, NodeState ns, int step) throws Exception{
+		List<Callback> callbacks = new ArrayList<>();
+		
+		ns.putShared("confirmationCB", confirmationCallback.getOptions());
+		ns.putShared("P1ProtectStep", step);
+		HttpPost post = new HttpPost(config.baseURL() + verifyAppend);
+		JsonValue theContextBody = getContext(ns.get("inResponseTo").asString(), ns.get("authnAttemptId").asString());
+		JsonValue theBody = new JsonValue(new LinkedHashMap<String, Object>(1));
+		theBody.put("context", theContextBody);
+		
+		if (theChoice.equalsIgnoreCase("SMS Tokencode"))
+			theBody.add("subjectCredentials", getSubCredVOrS("SMS"));
+		
+		if (theChoice.equalsIgnoreCase("Voice Tokencode"))
+			theBody.add("subjectCredentials", getSubCredVOrS("VOICE"));
+		
+		post.setEntity(new StringEntity(theBody.toString()));
+		// Send init call to SecurID
+		JSONObject fromPost = doPost(post);
+		ns.putShared("inResponseTo", getDataFromContext(fromPost, "messageId"));
+		ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
+		
+		StringAttributeInputCallback tokenCode = new StringAttributeInputCallback("smsvoiceToken", theChoice, null, true);
+		
+		callbacks.add(tokenCode);
+		callbacks.add(confirmationCallback);
 		return callbacks;
 	}
 
@@ -434,7 +480,7 @@ public class SecurID extends AbstractDecisionNode {
 		theMethMap.put("methodId", methodId);
 		JSONArray subCreds = new JSONArray();
 
-		if (methodId.equalsIgnoreCase("EMERGENCY_TOKENCODE") || methodId.equalsIgnoreCase("SECURID") || methodId.equalsIgnoreCase("TOKEN")) {
+		if (methodId.equalsIgnoreCase("EMERGENCY_TOKENCODE") || methodId.equalsIgnoreCase("SECURID") || methodId.equalsIgnoreCase("TOKEN") || methodId.equalsIgnoreCase("SMS") || methodId.equalsIgnoreCase("VOICE")) {
 			Map<String, Object> contextBody = new LinkedHashMap<String, Object>(1);
 			contextBody.put("name", methodId);
 			contextBody.put("value", value);
@@ -451,6 +497,23 @@ public class SecurID extends AbstractDecisionNode {
 		subCreds.put(theMethMap);
 		return subCreds;
 	}
+	
+	
+	private JSONArray getSubCredVOrS(String methodId) {
+		Map<String, Object> theMethMap = new LinkedHashMap<String, Object>(1);
+		theMethMap.put("methodId", methodId);
+		JSONArray subCreds = new JSONArray();
+
+		Map<String, Object> contextBody = new LinkedHashMap<String, Object>(1);
+		contextBody.put("name", methodId);
+		JSONArray collectedInputs = new JSONArray();
+		collectedInputs.put(contextBody);
+		theMethMap.put("collectedInputs", collectedInputs);
+
+		subCreds.put(theMethMap);
+		return subCreds;
+	}
+	
 
 	private JSONObject doInitialize(TreeContext context) throws Exception {
 		NodeState ns = context.getStateFor(this);
