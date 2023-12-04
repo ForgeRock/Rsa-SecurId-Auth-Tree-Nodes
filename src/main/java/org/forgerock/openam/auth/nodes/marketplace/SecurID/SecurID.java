@@ -653,9 +653,9 @@ public class SecurID extends AbstractDecisionNode {
 			return ImmutableList.of(
 					new Outcome(SUCCESS, bundle.getString("SuccessOutcome")), 
 					new Outcome(FAILURE, bundle.getString("FailureOutcome")), 
-					new Outcome(CHALLENGE, bundle.getString("ChallengeOutcome")), // TODO remove this outcome and handle in code
+					//new Outcome(CHALLENGE, bundle.getString("ChallengeOutcome")), // TODO remove this outcome and handle in code
 					new Outcome(NOTENROLLED, bundle.getString("NotEnrolledOutcome")), 
-					new Outcome(NOTSUPPORTED, bundle.getString("NotSupportedOutcome")), 
+					//new Outcome(NOTSUPPORTED, bundle.getString("NotSupportedOutcome")), //TODO not sure how to test not supported if no fido
 					new Outcome(CANCEL, bundle.getString("CancelOutcome")), 
 					new Outcome(ERROR, bundle.getString("ErrorOutcome")));
 		}
