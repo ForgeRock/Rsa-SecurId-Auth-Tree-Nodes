@@ -64,9 +64,7 @@ public class SecurID extends AbstractDecisionNode {
 	private static final String SUCCESS = "SUCCESS";
 	private static final String ERROR = "ERROR";
 	private static final String FAILURE = "FAILURE";
-	private static final String CHALLENGE = "CHALLENGE";
 	private static final String NOTENROLLED = "NOTENROLLED";
-	private static final String NOTSUPPORTED = "NOTSUPPORTED";
 	private static final String CANCEL = "CANCEL";
 
 	private static final String initializeAppend = "/authn/initialize";
@@ -202,6 +200,7 @@ public class SecurID extends AbstractDecisionNode {
 
 		} catch (Exception ex) {
 			String stackTrace = org.apache.commons.lang.exception.ExceptionUtils.getStackTrace(ex);
+			cleanSS(context.getStateFor(this));
 			logger.error(loggerPrefix + "Exception occurred: " + stackTrace);
 			context.getStateFor(this).putTransient(loggerPrefix + "Exception", new Date() + ": " + ex.getMessage());
 			context.getStateFor(this).putTransient(loggerPrefix + "StackTrace", new Date() + ": " + stackTrace);
@@ -229,7 +228,12 @@ public class SecurID extends AbstractDecisionNode {
 		if (fromPost.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("success")) {// check if fromPost has success
 			cleanSS(ns);
 			retVal = Action.goTo(SUCCESS).build();
-		} else {
+		}
+		else if (fromPost.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("fail")) {
+			cleanSS(ns);
+			retVal = Action.goTo(FAILURE).build();
+		}
+		else {
 			if (step == 3) {
 				String url = getQRURL(fromPost);
 				callbacks.add(generateQRCallback(url));
