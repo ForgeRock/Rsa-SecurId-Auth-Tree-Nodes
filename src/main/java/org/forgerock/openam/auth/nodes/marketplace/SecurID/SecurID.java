@@ -54,7 +54,7 @@ import com.google.inject.assistedinject.Assisted;
 import com.sun.identity.authentication.callbacks.ScriptTextOutputCallback;
 import com.sun.identity.sm.RequiredValueValidator;
 
-@Node.Metadata(outcomeProvider = SecurID.SecurIDOutcomeProvider.class, configClass = SecurID.Config.class, tags = { "marketplace", "trustnetwork" })
+@Node.Metadata(outcomeProvider = SecurID.SecurIDOutcomeProvider.class, configClass = SecurID.Config.class, tags = {"multi-factor authentication", "marketplace", "trustnetwork" })
 public class SecurID extends AbstractDecisionNode {
 
 	private final Logger logger = LoggerFactory.getLogger(SecurID.class);
@@ -124,30 +124,9 @@ public class SecurID extends AbstractDecisionNode {
 
 				// first get the response from the call
 				JSONObject fromPost = doInitialize(context);
-
-				// now check if MFA needed
-				if (!isMFANeeded(fromPost)) {
-					cleanSS(ns);
-					return Action.goTo(SUCCESS).build();
-				}
-
-				// determine if user is registered for at least one MFA
-				ArrayList<String> choices = getChoices(fromPost);
-				choices.trimToSize();
-				if (choices.size() == 0) {
-					cleanSS(ns);
-					return Action.goTo(NOTENROLLED).build();
-				}
-
-				// if users only has one MFA choice, go to that choice and start next step after initilize
-				if (choices.size() == 1) {
-					List<Callback> callbacks = choiceSelectedHelper(choices.get(0), ns);
-					return Action.send(callbacks).build();
-				}
-
-				// if here, then user has at least two MFA choice enrolled. We need to let them choose which one
-				List<Callback> callbacks = completeInitialize(ns, choices, fromPost);
-				return Action.send(callbacks).build();
+				
+				return startChoice(fromPost, ns);
+				
 			} else {
 				// check if we just came from step 0, which indicates the user has selected there MFA path
 				// otherwise, we are already on a MFA path and either verifying or waiting for a push completion
@@ -163,13 +142,32 @@ public class SecurID extends AbstractDecisionNode {
 						// depending on choice, we need to show them either input screen or make the push and show a spinner, or QR code and set P1ProtectStep accordingly
 					List<Callback> choiceSelectedCallbacks = choiceSelected(context, ns);
 					return Action.send(choiceSelectedCallbacks).build();
-				case 1:// they went with RSA SecurID or Athenticate Tokencode or SMS or Voice
+				case 1:// they went with RSA SecurID or Athenticate Tokencode or emergency 
 						// we just got back here, so that means they sent us a token
 					JSONObject result = checkToken(context);
+					
+					
+					System.out.println();
+					System.out.println();
+					System.out.println();
+					System.out.println();
+					System.out.println("Here is the result:");
+					System.out.println(result);
+					System.out.println();
+					System.out.println();
+					System.out.println();
+					System.out.println();
+					
+					
 					if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {
 						cleanSS(ns);
 						return Action.goTo(SUCCESS).build();
-					} else {
+					} 
+					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE")&& 
+							result.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("SUCCESS")) {
+						return startChoice(result, ns);
+					}
+					else {
 						// TODO if here, then they failed token match. Give another chance? For now, I'm sending to failure
 						cleanSS(ns);
 						return Action.goTo(FAILURE).build();
@@ -187,7 +185,12 @@ public class SecurID extends AbstractDecisionNode {
 					if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {
 						cleanSS(ns);
 						return Action.goTo(SUCCESS).build();
-					} else {
+					} 
+					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE") && 
+							result.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("SUCCESS")) {
+						startChoice(result, ns);
+					}
+					else {
 						// TODO if here, then they failed token match. Give another chance? For now, I'm sending to failure
 						cleanSS(ns);
 						return Action.goTo(FAILURE).build();
@@ -209,6 +212,37 @@ public class SecurID extends AbstractDecisionNode {
 
 		return Action.goTo(ERROR).build();
 	}
+	
+	
+	
+	private Action startChoice(JSONObject fromPost, NodeState ns) throws Exception{
+		
+		// now check if MFA needed
+		if (!isMFANeeded(fromPost)) {
+			cleanSS(ns);
+			return Action.goTo(SUCCESS).build();
+		}
+		
+		// determine if user is registered for at least one MFA
+		ArrayList<String> choices = getChoices(fromPost);
+		choices.trimToSize();
+		if (choices.size() == 0) {
+			cleanSS(ns);
+			return Action.goTo(NOTENROLLED).build();
+		}
+
+		// if users only has one MFA choice, go to that choice and start next step after initialize
+		if (choices.size() == 1) {
+			List<Callback> callbacks = choiceSelectedHelper(choices.get(0), ns);
+			return Action.send(callbacks).build();
+		}
+
+		// if here, then user has at least two MFA choice enrolled. We need to let them choose which one
+		List<Callback> callbacks = completeInitialize(ns, choices, fromPost);
+		return Action.send(callbacks).build();
+		
+	}
+	
 
 	private Action checkApproval(NodeState ns, int step, String theChoice) throws Exception {
 		Action retVal = null;
@@ -225,9 +259,15 @@ public class SecurID extends AbstractDecisionNode {
 		ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
 		ns.putShared("PingReferenceId", getPushRef(fromPost, theChoice));
 
-		if (fromPost.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("success")) {// check if fromPost has success
+		if (fromPost.getString("attemptResponseCode")!=null && fromPost.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {// check if fromPost has success
 			cleanSS(ns);
 			retVal = Action.goTo(SUCCESS).build();
+			
+		}
+		
+		else if (fromPost.getString("attemptResponseCode") != null && fromPost.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE") && 
+				 fromPost.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("SUCCESS")) {
+			startChoice(fromPost, ns);
 		}
 		else if (fromPost.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("fail")) {
 			cleanSS(ns);
@@ -323,6 +363,8 @@ public class SecurID extends AbstractDecisionNode {
 			theBody.add("subjectCredentials", getSubCred("VOICE", token));
 		else if (theChoice.equalsIgnoreCase("SMS Tokencode"))
 			theBody.add("subjectCredentials", getSubCred("SMS", token));
+		else if (theChoice.equalsIgnoreCase("RSA SecurID New PIN"))
+			theBody.add("subjectCredentials", getSubCred("SECURID_NEW_PIN", token));
 
 		post.setEntity(new StringEntity(theBody.toString()));
 
@@ -358,6 +400,7 @@ public class SecurID extends AbstractDecisionNode {
 		case "RSA SecurID":
 		case "Authenticate Tokencode":
 		case "Emergency Tokencode":
+		case "RSA SecurID New PIN":
 			// need to show them an input screen
 			StringAttributeInputCallback tokenCode = new StringAttributeInputCallback("rsaToken", theChoice, null, true);
 			callbacks.add(tokenCode);
@@ -484,7 +527,7 @@ public class SecurID extends AbstractDecisionNode {
 		theMethMap.put("methodId", methodId);
 		JSONArray subCreds = new JSONArray();
 
-		if (methodId.equalsIgnoreCase("EMERGENCY_TOKENCODE") || methodId.equalsIgnoreCase("SECURID") || methodId.equalsIgnoreCase("TOKEN") || methodId.equalsIgnoreCase("SMS") || methodId.equalsIgnoreCase("VOICE")) {
+		if (methodId.equalsIgnoreCase("EMERGENCY_TOKENCODE") || methodId.equalsIgnoreCase("SECURID") || methodId.equalsIgnoreCase("TOKEN") || methodId.equalsIgnoreCase("SMS") || methodId.equalsIgnoreCase("VOICE") ||  methodId.equalsIgnoreCase("SECURID_NEW_PIN")) {
 			Map<String, Object> contextBody = new LinkedHashMap<String, Object>(1);
 			contextBody.put("name", methodId);
 			contextBody.put("value", value);
@@ -626,6 +669,7 @@ public class SecurID extends AbstractDecisionNode {
 
 	private ArrayList<String> getChoices(JSONObject fromPost) {
 		ArrayList<String> retVal = new ArrayList<String>();
+		int priority = 2;
 
 		JSONArray theChallenges = fromPost.getJSONObject("challengeMethods").getJSONArray("challenges");
 
@@ -639,8 +683,21 @@ public class SecurID extends AbstractDecisionNode {
 				// do nothing
 			} else {
 				String thisOne = thisJO.getString("displayName");
-				if (!retVal.contains(thisOne))
+				if (!retVal.contains(thisOne)) {
+					if (retVal.size()>0) {
+						//need to put higher priority first 
+						int thisPriority = thisJO.getInt("priority");
+						
+						if (thisPriority < priority) {
+							thisOne = retVal.set(0, thisOne);
+							priority = thisPriority;
+						}
+					}
+					else {
+						priority = thisJO.getInt("priority");
+					}
 					retVal.add(thisOne);
+				}
 			}
 
 		}
