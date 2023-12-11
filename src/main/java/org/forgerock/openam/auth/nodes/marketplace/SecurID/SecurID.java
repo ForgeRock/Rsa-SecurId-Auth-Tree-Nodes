@@ -144,20 +144,7 @@ public class SecurID extends AbstractDecisionNode {
 					return Action.send(choiceSelectedCallbacks).build();
 				case 1:// they went with RSA SecurID or Athenticate Tokencode or emergency 
 						// we just got back here, so that means they sent us a token
-					JSONObject result = checkToken(context);
-					
-					
-					System.out.println();
-					System.out.println();
-					System.out.println();
-					System.out.println();
-					System.out.println("Here is the result:");
-					System.out.println(result);
-					System.out.println();
-					System.out.println();
-					System.out.println();
-					System.out.println();
-					
+					JSONObject result = checkToken(context);					
 					
 					if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {
 						cleanSS(ns);
