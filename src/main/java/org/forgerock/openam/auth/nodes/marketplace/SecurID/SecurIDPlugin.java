@@ -49,7 +49,7 @@ import org.slf4j.LoggerFactory;
  */
 public class SecurIDPlugin extends AbstractNodeAmPlugin {
 
-	static private String currentVersion = "0.0.71";
+	static private String currentVersion = "0.0.72";
 	static final String logAppender = "[Version: " + currentVersion + "][Marketplace] ";
 	private final Logger logger = LoggerFactory.getLogger(SecurIDPlugin.class);
 	private String loggerPrefix = "[IGCommunicationPlugin]" + SecurIDPlugin.logAppender;
