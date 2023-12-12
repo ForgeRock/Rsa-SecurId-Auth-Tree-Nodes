@@ -220,6 +220,9 @@ public class SecurID extends AbstractDecisionNode {
 
 		// if users only has one MFA choice, go to that choice and start next step after initialize
 		if (choices.size() == 1) {
+			ns.putShared("inResponseTo", getDataFromContext(fromPost, "messageId"));
+			ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
+			ns.putShared("p1Choice", choices.get(0));
 			List<Callback> callbacks = choiceSelectedHelper(choices.get(0), ns);
 			return Action.send(callbacks).build();
 		}
