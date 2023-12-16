@@ -20,15 +20,19 @@ import javax.inject.Inject;
 import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.ChoiceCallback;
 import javax.security.auth.callback.ConfirmationCallback;
+import javax.security.auth.callback.PasswordCallback;
 
+import org.apache.commons.lang.enums.EnumUtils;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.conn.ssl.NoopHostnameVerifier;
+import org.apache.http.conn.ssl.TrustAllStrategy;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.impl.client.HttpClients;
+import org.apache.http.ssl.SSLContextBuilder;
 import org.apache.http.util.EntityUtils;
 import org.forgerock.json.JsonValue;
 import org.forgerock.openam.annotations.sm.Attribute;
@@ -72,7 +76,7 @@ public class SecurID extends AbstractDecisionNode {
 
 	private static final ConfirmationCallback confirmationCallback = new ConfirmationCallback(ConfirmationCallback.INFORMATION, new String[] { "Next", "Cancel" }, 0);
 	private static final ConfirmationCallback confirmationCancelCallback = new ConfirmationCallback(ConfirmationCallback.INFORMATION, new String[] { "Cancel" }, 0);
-
+	
 	/**
 	 * Configuration for the node.
 	 */
@@ -86,7 +90,7 @@ public class SecurID extends AbstractDecisionNode {
 		@Attribute(order = 200, validators = { RequiredValueValidator.class })
 		String clientID();
 
-		@Attribute(order = 300, validators = { RequiredValueValidator.class })
+		@Attribute(order = 300)
 		String assurancePolicy();
 
 		@Attribute(order = 400, validators = { RequiredValueValidator.class })
@@ -341,6 +345,12 @@ public class SecurID extends AbstractDecisionNode {
 				token = cb.getValue();
 				break;
 			}
+			else if(thisCallback instanceof PasswordCallback) {
+				PasswordCallback pc = (PasswordCallback) thisCallback;
+				token = String.copyValueOf(pc.getPassword());
+				break;
+			}
+			
 		}
 
 		if (theChoice.equalsIgnoreCase("Emergency Tokencode"))
@@ -355,6 +365,10 @@ public class SecurID extends AbstractDecisionNode {
 			theBody.add("subjectCredentials", getSubCred("SMS", token));
 		else if (theChoice.equalsIgnoreCase("RSA SecurID New PIN"))
 			theBody.add("subjectCredentials", getSubCred("SECURID_NEW_PIN", token));
+		else if (theChoice.equalsIgnoreCase("SECURID_NEWPIN"))
+			theBody.add("subjectCredentials", getSubCred("SECURID_NEWPIN", token));
+		else if (theChoice.equalsIgnoreCase("SECURID"))
+			theBody.add("subjectCredentials", getSubCred("SECURID", token));
 
 		post.setEntity(new StringEntity(theBody.toString()));
 
@@ -391,9 +405,11 @@ public class SecurID extends AbstractDecisionNode {
 		case "Authenticate Tokencode":
 		case "Emergency Tokencode":
 		case "RSA SecurID New PIN":
+		case "SECURID_NEWPIN":
+		case "SECURID":
 			// need to show them an input screen
-			StringAttributeInputCallback tokenCode = new StringAttributeInputCallback("rsaToken", theChoice, null, true);
-			callbacks.add(tokenCode);
+			PasswordCallback pc = new PasswordCallback(theChoice, true);
+			callbacks.add(pc);
 			callbacks.add(confirmationCallback);
 			ns.putShared("P1ProtectStep", 1);
 			ns.putShared("confirmationCB", confirmationCallback.getOptions());
@@ -437,9 +453,10 @@ public class SecurID extends AbstractDecisionNode {
 		ns.putShared("inResponseTo", getDataFromContext(fromPost, "messageId"));
 		ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
 		
-		StringAttributeInputCallback tokenCode = new StringAttributeInputCallback("smsvoiceToken", theChoice, null, true);
+		//StringAttributeInputCallback tokenCode = new StringAttributeInputCallback("smsvoiceToken", theChoice, null, true);
+		PasswordCallback pc = new PasswordCallback(theChoice, true);
 		
-		callbacks.add(tokenCode);
+		callbacks.add(pc);
 		callbacks.add(confirmationCallback);
 		return callbacks;
 	}
@@ -517,7 +534,7 @@ public class SecurID extends AbstractDecisionNode {
 		theMethMap.put("methodId", methodId);
 		JSONArray subCreds = new JSONArray();
 
-		if (methodId.equalsIgnoreCase("EMERGENCY_TOKENCODE") || methodId.equalsIgnoreCase("SECURID") || methodId.equalsIgnoreCase("TOKEN") || methodId.equalsIgnoreCase("SMS") || methodId.equalsIgnoreCase("VOICE") ||  methodId.equalsIgnoreCase("SECURID_NEW_PIN")) {
+		if (methodId.equalsIgnoreCase("EMERGENCY_TOKENCODE") || methodId.equalsIgnoreCase("SECURID") || methodId.equalsIgnoreCase("TOKEN") || methodId.equalsIgnoreCase("SMS") || methodId.equalsIgnoreCase("VOICE") ||  methodId.equalsIgnoreCase("SECURID_NEW_PIN") ||  methodId.equalsIgnoreCase("SECURID_NEWPIN")) {
 			Map<String, Object> contextBody = new LinkedHashMap<String, Object>(1);
 			contextBody.put("name", methodId);
 			contextBody.put("value", value);
@@ -629,7 +646,18 @@ public class SecurID extends AbstractDecisionNode {
 			post.setHeader("client-key", config.clientKey());
 			if (!config.verifySSL()) {
 				// Create a trust manager that does not validate certificate chains
-				httpClient = HttpClients.custom().setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE).build();
+				//httpClient = HttpClients.custom().setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE).build();
+				httpClient = HttpClients.
+						custom()
+						.setSSLContext(
+								SSLContextBuilder.
+								create().
+								loadTrustMaterial(
+										TrustAllStrategy.INSTANCE)
+								.build())
+						.setSSLHostnameVerifier(
+								NoopHostnameVerifier.INSTANCE)
+						.build();
 			} else {
 				httpClient = HttpClientBuilder.create().build();
 			}
@@ -663,7 +691,7 @@ public class SecurID extends AbstractDecisionNode {
 
 		JSONArray theChallenges = fromPost.getJSONObject("challengeMethods").getJSONArray("challenges");
 
-		// TODO Filter out FIDO choice, even if enabled. Not impl at this time
+		// TODO Filter and add choices of only ones we support
 		for (int i = 0; i < theChallenges.length(); i++) {
 
 			JSONObject thisJO = theChallenges.getJSONObject(i).getJSONArray("requiredMethods").getJSONObject(0);
@@ -672,9 +700,27 @@ public class SecurID extends AbstractDecisionNode {
 			if (methAttr != null && methAttr.length() > 0 && methAttr.getJSONObject(0).getString("name").equalsIgnoreCase("METHOD_NOT_APPLICABLE")) {
 				// do nothing
 			} else {
-				String thisOne = thisJO.getString("displayName");
-				if (!retVal.contains(thisOne)) {
-					if (retVal.size()>0) {
+				String thisOne = "";
+				if (thisJO.get("displayName")!=JSONObject.NULL) {
+					thisOne = thisJO.getString("displayName");
+				}
+				else {
+					thisOne = thisJO.getString("methodId");
+				}
+				
+				if (!retVal.contains(thisOne) && 
+					(thisOne.equalsIgnoreCase("RSA SecurID") ||
+					thisOne.equalsIgnoreCase("Authenticate Tokencode") ||
+					thisOne.equalsIgnoreCase("Emergency Tokencode") ||
+					thisOne.equalsIgnoreCase("RSA SecurID New PIN") ||
+					thisOne.equalsIgnoreCase("Device Biometrics") ||
+					thisOne.equalsIgnoreCase("Approve") ||
+					thisOne.equalsIgnoreCase("QR Code") ||
+					thisOne.equalsIgnoreCase("Voice Tokencode") ||
+					thisOne.equalsIgnoreCase("SMS Tokencode") ||
+					thisOne.equalsIgnoreCase("SECURID_NEWPIN") ||
+					thisOne.equalsIgnoreCase("SECURID"))) {
+					if (retVal.size()>0 && thisJO.get("priority")!=JSONObject.NULL) {
 						//need to put higher priority first 
 						int thisPriority = thisJO.getInt("priority");
 						
@@ -683,7 +729,7 @@ public class SecurID extends AbstractDecisionNode {
 							priority = thisPriority;
 						}
 					}
-					else {
+					else if (thisJO.get("priority")!=JSONObject.NULL){
 						priority = thisJO.getInt("priority");
 					}
 					retVal.add(thisOne);
@@ -704,9 +750,7 @@ public class SecurID extends AbstractDecisionNode {
 			return ImmutableList.of(
 					new Outcome(SUCCESS, bundle.getString("SuccessOutcome")), 
 					new Outcome(FAILURE, bundle.getString("FailureOutcome")), 
-					//new Outcome(CHALLENGE, bundle.getString("ChallengeOutcome")), // TODO remove this outcome and handle in code
 					new Outcome(NOTENROLLED, bundle.getString("NotEnrolledOutcome")), 
-					//new Outcome(NOTSUPPORTED, bundle.getString("NotSupportedOutcome")), //TODO not sure how to test not supported if no fido
 					new Outcome(CANCEL, bundle.getString("CancelOutcome")), 
 					new Outcome(ERROR, bundle.getString("ErrorOutcome")));
 		}
