@@ -22,7 +22,6 @@ import javax.security.auth.callback.ChoiceCallback;
 import javax.security.auth.callback.ConfirmationCallback;
 import javax.security.auth.callback.PasswordCallback;
 
-import org.apache.commons.lang.enums.EnumUtils;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpPost;
