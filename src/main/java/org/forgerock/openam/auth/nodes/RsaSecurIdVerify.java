@@ -29,8 +29,11 @@ import static org.forgerock.openam.auth.nodes.RSASecurIdUtil.mapToJsonValue;
 import static org.forgerock.util.CloseSilentlyFunction.closeSilently;
 import static org.forgerock.util.Closeables.closeSilentlyAsync;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.URISyntaxException;
 import java.security.cert.X509Certificate;
+import java.util.Date;
 import java.util.List;
 import java.util.ResourceBundle;
 import java.util.UUID;
@@ -76,6 +79,7 @@ public class RsaSecurIdVerify extends AbstractDecisionNode {
     private final Config config;
     private final Realm realm;
     private final HttpClientHandler clientHandler;
+    private String loggerPrefix = "[RSA SecurId Verify][Marketplace] ";
 
     /**
      * Configuration for the node.
@@ -164,9 +168,31 @@ public class RsaSecurIdVerify extends AbstractDecisionNode {
 
         try {
             return verifyResponse.getOrThrow().build();
-        } catch (Exception e) {
-            logger.error("Unable to get verify response");
-            throw new NodeProcessException(e);
+        } catch (Exception ex) {
+			logger.error(loggerPrefix + "Exception occurred: " + ex.getStackTrace());
+			context.getStateFor(this).putShared(loggerPrefix + "Exception", new Date() + ": " + ex.getMessage());
+			StringWriter sw = new StringWriter();
+			PrintWriter pw = new PrintWriter(sw);
+			ex.printStackTrace(pw);
+			context.getStateFor(this).putShared(loggerPrefix + "StackTrace", new Date() + ": " + sw.toString());
+			return Action.goTo(RsaSecurIdVerifyOutcome.ERROR.name()).build();
+        }
+        finally {
+        	
+			try {
+				if (request != null) {
+					request.close();
+				}
+
+				if (clientHandler != null) {
+					clientHandler.close();
+				}
+
+			} catch (Exception e) {
+				// Do Nothing
+			}
+        	
+        	
         }
     }
 
