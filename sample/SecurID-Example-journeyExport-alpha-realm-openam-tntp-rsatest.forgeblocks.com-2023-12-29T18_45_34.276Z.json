@@ -1,0 +1,367 @@
+{
+  "meta": {
+    "origin": "https://openam-tntp-rsatest.forgeblocks.com/platform/?realm=alpha#/journeys/SecurID-Example",
+    "exportedBy": "justin.chin@forgerock.com",
+    "exportDate": "2023-12-29T18:45:34.276Z",
+    "exportTool": "platform-admin ui tree export",
+    "exportToolVersion": "1.0",
+    "treesSelectedForExport": [
+      "SecurID-Example"
+    ],
+    "innerTreesIncluded": []
+  },
+  "trees": {
+    "SecurID-Example": {
+      "tree": {
+        "_id": "SecurID-Example",
+        "_rev": "-1641909774",
+        "identityResource": "managed/alpha_user",
+        "uiConfig": {
+          "categories": "[]"
+        },
+        "entryNodeId": "5b94d685-1801-4be7-9b64-11ebf252789e",
+        "innerTreeOnly": false,
+        "nodes": {
+          "e7671418-aedb-4101-8550-0453663cdd86": {
+            "x": 572,
+            "y": 320.015625,
+            "connections": {
+              "Retry": "d0315a1b-efde-4e87-a4fb-09091ca8a4f4",
+              "Reject": "e301438c-0bd0-429c-ab0c-66126501069a"
+            },
+            "nodeType": "RetryLimitDecisionNode",
+            "displayName": "Retry Limit Decision"
+          },
+          "d0315a1b-efde-4e87-a4fb-09091ca8a4f4": {
+            "x": 522,
+            "y": 30.015625,
+            "connections": {
+              "ERROR": "a74b5fb3-6d4b-4e9d-96ba-f4327312eeef",
+              "SUCCESS": "70e691a5-1e33-4ac3-a356-e7b6d60d92e0",
+              "NOTENROLLED": "7c2ca029-80aa-4d61-93eb-96513f29e3db",
+              "CANCEL": "e7671418-aedb-4101-8550-0453663cdd86",
+              "FAILURE": "e7671418-aedb-4101-8550-0453663cdd86"
+            },
+            "nodeType": "SecurID",
+            "displayName": "RSA SecurID"
+          },
+          "a74b5fb3-6d4b-4e9d-96ba-f4327312eeef": {
+            "x": 882,
+            "y": 228.015625,
+            "connections": {
+              "true": "e301438c-0bd0-429c-ab0c-66126501069a",
+              "false": "e301438c-0bd0-429c-ab0c-66126501069a"
+            },
+            "nodeType": "PageNode",
+            "displayName": "Error Page"
+          },
+          "5b94d685-1801-4be7-9b64-11ebf252789e": {
+            "x": 125,
+            "y": 247.015625,
+            "connections": {
+              "outcome": "44937c60-951b-48e7-86ae-d76ea26d5663"
+            },
+            "nodeType": "PageNode",
+            "displayName": "Page Node"
+          },
+          "44937c60-951b-48e7-86ae-d76ea26d5663": {
+            "x": 342,
+            "y": 455.015625,
+            "connections": {
+              "true": "d0315a1b-efde-4e87-a4fb-09091ca8a4f4",
+              "false": "e301438c-0bd0-429c-ab0c-66126501069a"
+            },
+            "nodeType": "DataStoreDecisionNode",
+            "displayName": "Data Store Decision"
+          },
+          "7c2ca029-80aa-4d61-93eb-96513f29e3db": {
+            "x": 884,
+            "y": 61.015625,
+            "connections": {
+              "true": "e301438c-0bd0-429c-ab0c-66126501069a",
+              "false": "e301438c-0bd0-429c-ab0c-66126501069a"
+            },
+            "nodeType": "PageNode",
+            "displayName": "Page Node"
+          }
+        },
+        "staticNodes": {
+          "startNode": {
+            "x": 14,
+            "y": 126
+          },
+          "70e691a5-1e33-4ac3-a356-e7b6d60d92e0": {
+            "x": 759,
+            "y": 55
+          },
+          "e301438c-0bd0-429c-ab0c-66126501069a": {
+            "x": 1153,
+            "y": 513
+          }
+        },
+        "enabled": true
+      },
+      "nodes": {
+        "e7671418-aedb-4101-8550-0453663cdd86": {
+          "_id": "e7671418-aedb-4101-8550-0453663cdd86",
+          "_rev": "-438583422",
+          "incrementUserAttributeOnFailure": false,
+          "retryLimit": 3,
+          "_type": {
+            "_id": "RetryLimitDecisionNode",
+            "name": "Retry Limit Decision",
+            "collection": true
+          },
+          "_outcomes": [
+            {
+              "id": "Retry",
+              "displayName": "Retry"
+            },
+            {
+              "id": "Reject",
+              "displayName": "Reject"
+            }
+          ]
+        },
+        "d0315a1b-efde-4e87-a4fb-09091ca8a4f4": {
+          "_id": "d0315a1b-efde-4e87-a4fb-09091ca8a4f4",
+          "_rev": "1103445070",
+          "assurancePolicy": "<Your Assurance Policy>",
+          "clientID": "ForgeRock Example Journey",
+          "theWaitingForResponseMessage": "Waiting for your response",
+          "thePrompt": "Select your preferred authentication method",
+          "clientKey": "<Client Key>",
+          "verifySSL": true,
+          "baseURL": "https://<yourEnv>.auth.securid.com:443/mfa/v1_1",
+          "_type": {
+            "_id": "SecurID",
+            "name": "RSA SecurID",
+            "collection": true
+          },
+          "_outcomes": [
+            {
+              "id": "SUCCESS",
+              "displayName": "Success"
+            },
+            {
+              "id": "FAILURE",
+              "displayName": "Failure"
+            },
+            {
+              "id": "NOTENROLLED",
+              "displayName": "Not Enrolled"
+            },
+            {
+              "id": "CANCEL",
+              "displayName": "Cancel"
+            },
+            {
+              "id": "ERROR",
+              "displayName": "Error"
+            }
+          ]
+        },
+        "a74b5fb3-6d4b-4e9d-96ba-f4327312eeef": {
+          "_id": "a74b5fb3-6d4b-4e9d-96ba-f4327312eeef",
+          "_rev": "1445019627",
+          "nodes": [
+            {
+              "_id": "54d16cbe-5bd2-428d-8e37-ab1d251eddca",
+              "nodeType": "MessageNode",
+              "displayName": "Message Node"
+            }
+          ],
+          "pageDescription": {},
+          "stage": "{\"ConfirmationCallback\":[{\"id\":\"54d16cbe-5bd2-428d-8e37-ab1d251eddca\",\"showOnlyPositiveAnswer\":true}]}",
+          "pageHeader": {},
+          "_type": {
+            "_id": "PageNode",
+            "name": "Page Node",
+            "collection": true
+          },
+          "_outcomes": [
+            {
+              "id": "true",
+              "displayName": "True"
+            },
+            {
+              "id": "false",
+              "displayName": "False"
+            }
+          ]
+        },
+        "5b94d685-1801-4be7-9b64-11ebf252789e": {
+          "_id": "5b94d685-1801-4be7-9b64-11ebf252789e",
+          "_rev": "699750239",
+          "nodes": [
+            {
+              "_id": "61e05d1d-f081-4b8f-8663-4c085d2d96fd",
+              "nodeType": "ValidatedUsernameNode",
+              "displayName": "Platform Username"
+            },
+            {
+              "_id": "811efed8-3eef-4be8-b441-0dda643b58f1",
+              "nodeType": "ValidatedPasswordNode",
+              "displayName": "Platform Password"
+            }
+          ],
+          "pageDescription": {},
+          "pageHeader": {},
+          "_type": {
+            "_id": "PageNode",
+            "name": "Page Node",
+            "collection": true
+          },
+          "_outcomes": [
+            {
+              "id": "outcome",
+              "displayName": "Outcome"
+            }
+          ]
+        },
+        "44937c60-951b-48e7-86ae-d76ea26d5663": {
+          "_id": "44937c60-951b-48e7-86ae-d76ea26d5663",
+          "_rev": "-1940133135",
+          "_type": {
+            "_id": "DataStoreDecisionNode",
+            "name": "Data Store Decision",
+            "collection": true
+          },
+          "_outcomes": [
+            {
+              "id": "true",
+              "displayName": "True"
+            },
+            {
+              "id": "false",
+              "displayName": "False"
+            }
+          ]
+        },
+        "7c2ca029-80aa-4d61-93eb-96513f29e3db": {
+          "_id": "7c2ca029-80aa-4d61-93eb-96513f29e3db",
+          "_rev": "1194536852",
+          "nodes": [
+            {
+              "_id": "c70523a7-afe1-48ea-9fb8-a76b6211c55d",
+              "nodeType": "MessageNode",
+              "displayName": "Message"
+            }
+          ],
+          "stage": "{\"ConfirmationCallback\":[{\"id\":\"c70523a7-afe1-48ea-9fb8-a76b6211c55d\",\"showOnlyPositiveAnswer\":true}]}",
+          "pageDescription": {},
+          "pageHeader": {},
+          "_type": {
+            "_id": "PageNode",
+            "name": "Page Node",
+            "collection": true
+          },
+          "_outcomes": [
+            {
+              "id": "true",
+              "displayName": "True"
+            },
+            {
+              "id": "false",
+              "displayName": "False"
+            }
+          ]
+        }
+      },
+      "innerNodes": {
+        "54d16cbe-5bd2-428d-8e37-ab1d251eddca": {
+          "_id": "54d16cbe-5bd2-428d-8e37-ab1d251eddca",
+          "_rev": "-632158469",
+          "messageYes": {
+            "en": "Exit"
+          },
+          "message": {
+            "en": "An Error Occurred"
+          },
+          "messageNo": {},
+          "_type": {
+            "_id": "MessageNode",
+            "name": "Message Node",
+            "collection": true
+          },
+          "_outcomes": [
+            {
+              "id": "true",
+              "displayName": "True"
+            },
+            {
+              "id": "false",
+              "displayName": "False"
+            }
+          ]
+        },
+        "61e05d1d-f081-4b8f-8663-4c085d2d96fd": {
+          "_id": "61e05d1d-f081-4b8f-8663-4c085d2d96fd",
+          "_rev": "724660519",
+          "usernameAttribute": "userName",
+          "validateInput": false,
+          "_type": {
+            "_id": "ValidatedUsernameNode",
+            "name": "Platform Username",
+            "collection": true
+          },
+          "_outcomes": [
+            {
+              "id": "outcome",
+              "displayName": "Outcome"
+            }
+          ]
+        },
+        "811efed8-3eef-4be8-b441-0dda643b58f1": {
+          "_id": "811efed8-3eef-4be8-b441-0dda643b58f1",
+          "_rev": "-1944644863",
+          "validateInput": false,
+          "passwordAttribute": "password",
+          "_type": {
+            "_id": "ValidatedPasswordNode",
+            "name": "Platform Password",
+            "collection": true
+          },
+          "_outcomes": [
+            {
+              "id": "outcome",
+              "displayName": "Outcome"
+            }
+          ]
+        },
+        "c70523a7-afe1-48ea-9fb8-a76b6211c55d": {
+          "_id": "c70523a7-afe1-48ea-9fb8-a76b6211c55d",
+          "_rev": "816752165",
+          "messageYes": {
+            "en": "Exit"
+          },
+          "message": {
+            "en": "You don't have any enrolled authenticators."
+          },
+          "messageNo": {},
+          "_type": {
+            "_id": "MessageNode",
+            "name": "Message Node",
+            "collection": true
+          },
+          "_outcomes": [
+            {
+              "id": "true",
+              "displayName": "True"
+            },
+            {
+              "id": "false",
+              "displayName": "False"
+            }
+          ]
+        }
+      },
+      "scripts": {},
+      "emailTemplates": {},
+      "socialIdentityProviders": {},
+      "themes": [],
+      "saml2Entities": {},
+      "circlesOfTrust": {}
+    }
+  }
+}
