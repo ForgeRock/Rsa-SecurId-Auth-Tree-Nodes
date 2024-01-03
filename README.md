@@ -11,60 +11,32 @@
  * Header, with the fields enclosed by brackets [] replaced by your own identifying
  * information: "Portions copyright [year] [name of copyright owner]".
  *
- * Copyright 2019 ForgeRock AS.
+ * Copyright 2023 ForgeRock AS.
 -->
-# RSA SecurID Authentication Nodes
+# SecurID
 
-The **RSA SecurID** authentication nodes lets administrators integrate RSA SecurID Access Management MFA into a ForgeRock Intelligent Access Journey.
-
-## Usage
-
-To deploy these nodes, download the jar from the releases tab on github
-[here](https://github.com/ForgeRock/Rsa-SecurId-Auth-Tree-Nodes/releases/latest). Next, copy the jar into the
-../web-container/webapps/openam/WEB-INF/lib directory where AM is deployed. Restart the web container to pick up the
-new nodes. The nodes will then appear in the authentication trees components palette.
-
-### Import Tree
-Use the [AM Tree Tool](https://github.com/vscheuber/AM-treetool) to import the RSA tree:
-```
-./amtree.sh -h https://cdk.iam.example.com/am -u amadmin -p 'password' -i -t RsaTree -f rsa.json
-```
-
-### RSA SecurID Initialize Node
-This node initializes the MFA request to RSA SecurID based on the username collected.
-
-#### RSA SecurID Initialize Node Configuration
-* **Base URL** - The base URL of the RSA SecurID AM instance
-* **Client ID** - The client ID of the agent configured in RSA SecurID
-* **Client Key** - The RSA SecurID Authentication API Client Key.
-* **Verify SSL** - If SSL validation is required for the client, set this parameter to "true". If SSL validation is not required, set the parameter as "false".
-
-### RSA SecurId Collector Node
-This node collects the one time password for use with RSA SecurID.  It supports both SECURID as well as
-SECURID_NEXT_TOKENCODE challenges.
+A simple authentication node for ForgeRock's [Identity Platform][forgerock_platform] 7.3.0 and above. This node... **SHORT DESCRIPTION HERE**
 
 
-### RSA SecurId Verify Node
-This node sends the collected one time password to RSA SecurID for validation. It supports both SECURID as well as 
-SECURID_NEXT_TOKENCODE challenges.
-
-#### RSA SecurId Verify Node Configuration
-
-* **Base URL** - Enable the RSA SecurID
-* **Client Key** - The RSA SecurID Authentication API Client Key.
-* **Verify SSL** - If SSL validation is required for the client, set this parameter to "true". If SSL validation is not required, set the parameter as "false".
+Copy the .jar file from the ../target directory into the ../web-container/webapps/openam/WEB-INF/lib directory where AM is deployed.  Restart the web container to pick up the new node.  The node will then appear in the authentication trees components palette.
 
 
-### RSA SecurId Configuration
-1. Follow instructions [here](https://community.rsa.com/t5/securid-authentication-manager/configure-the-rsa-securid-authentication-api-for-authentication/ta-p/568410)
-to enable the RSA SecurID Authentication API. Note the Access Key for use when configuring the tree.
-   ![alt text](./images/AuthenticationAPI.png)
-2. Follow instructions [here](https://community.rsa.com/t5/securid-authentication-manager/add-an-authentication-agent/ta-p/629323)
-to create an Authentication Agent. Note the Agent Name for use when configuring the tree.
-   ![alt text](./images/AuthenticationAgent.png)
+**USAGE HERE**
 
 
-### Example Flow
+The code in this repository has binary dependencies that live in the ForgeRock maven repository. Maven can be configured to authenticate to this repository by following the following [ForgeRock Knowledge Base Article](https://backstage.forgerock.com/knowledge/kb/article/a74096897).
 
+**SPECIFIC BUILD INSTRUCTIONS HERE**
 
-![SAML_TREE](./images/flow.png)
+**SCREENSHOTS ARE GOOD LIKE BELOW**
+
+![ScreenShot](./example.png)
+
+        
+The sample code described herein is provided on an "as is" basis, without warranty of any kind, to the fullest extent permitted by law. ForgeRock does not warrant or guarantee the individual success developers may have in implementing the sample code on their development platforms or in production configurations.
+
+ForgeRock does not warrant, guarantee or make any representations regarding the use, results of use, accuracy, timeliness or completeness of any data or information relating to the sample code. ForgeRock disclaims all warranties, expressed or implied, and in particular, disclaims all warranties of merchantability, and warranties related to the code, or any service or software related thereto.
+
+ForgeRock shall not be liable for any direct, indirect or consequential damages or costs of any type arising out of any action taken by you or others related to the sample code.
+
+[forgerock_platform]: https://www.forgerock.com/platform/  
