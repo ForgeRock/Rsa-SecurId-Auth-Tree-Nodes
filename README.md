@@ -31,7 +31,7 @@ Identity Cloud provides sample journeys to help you understand the most common R
 
 To use this node, you must:
 
-* Enroll RSA authenticators. Refer to [RSA SecurID setup](https://backstage.forgerock.com/docs/idcloud/latest/release-notes/rapid-channel/auth-node-rsa-securid.html#auth-node-rsa-securid-setup) for more information.
+* Enroll RSA authenticators. Refer to [RSA SecurID setup](https://backstage.forgerock.com/docs/auth-node-ref/latest/cloud/auth-node-rsa-securid.html) for more information.
 * Ensure the username on the shared node state matches one of the following:
 	* The username, alternate username, or email address of the user in the RSA Cloud Authentication.
 	* The username in RSA Authentication Manager.
@@ -81,7 +81,7 @@ Note the Authentication Agent name. You will need this when configuring the RSA 
 
 ## RSA SecurID node implementation
 
-Refer to the implementation details of <a href="https://backstage.forgerock.com/docs/idcloud/latest/release-notes/rapid-channel/auth-node-rsa-securid-node.html">RSA SecurID node here</a>.
+Refer to the implementation details of <a href="https://backstage.forgerock.com/docs/auth-node-ref/latest/cloud/auth-node-rsa-securid.html">RSA SecurID node here</a>.
 
 
 # RSA SecurID node
