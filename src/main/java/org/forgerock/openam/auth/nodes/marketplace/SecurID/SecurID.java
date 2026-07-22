@@ -368,6 +368,8 @@ public class SecurID extends AbstractDecisionNode {
 			theBody.add("subjectCredentials", getSubCred("SECURID_NEWPIN", token));
 		else if (theChoice.equalsIgnoreCase("SECURID"))
 			theBody.add("subjectCredentials", getSubCred("SECURID", token));
+		else if (theChoice.equalsIgnoreCase("SECURID_NEXT_TOKENCODE"))
+			theBody.add("subjectCredentials", getSubCred("SECURID_NEXT_TOKENCODE", token));
 
 		post.setEntity(new StringEntity(theBody.toString()));
 
@@ -406,8 +408,10 @@ public class SecurID extends AbstractDecisionNode {
 		case "RSA SecurID New PIN":
 		case "SECURID_NEWPIN":
 		case "SECURID":
+		case "SECURID_NEXT_TOKENCODE":
 			// need to show them an input screen
-			PasswordCallback pc = new PasswordCallback(theChoice, true);
+			String promptLabel = theChoice.equals("SECURID_NEXT_TOKENCODE") ? "Next Tokencode" : theChoice;
+			PasswordCallback pc = new PasswordCallback(promptLabel, true);
 			callbacks.add(pc);
 			callbacks.add(confirmationCallback);
 			ns.putShared("P1ProtectStep", 1);
@@ -533,7 +537,7 @@ public class SecurID extends AbstractDecisionNode {
 		theMethMap.put("methodId", methodId);
 		JSONArray subCreds = new JSONArray();
 
-		if (methodId.equalsIgnoreCase("EMERGENCY_TOKENCODE") || methodId.equalsIgnoreCase("SECURID") || methodId.equalsIgnoreCase("TOKEN") || methodId.equalsIgnoreCase("SMS") || methodId.equalsIgnoreCase("VOICE") ||  methodId.equalsIgnoreCase("SECURID_NEW_PIN") ||  methodId.equalsIgnoreCase("SECURID_NEWPIN")) {
+		if (methodId.equalsIgnoreCase("EMERGENCY_TOKENCODE") || methodId.equalsIgnoreCase("SECURID") || methodId.equalsIgnoreCase("TOKEN") || methodId.equalsIgnoreCase("SMS") || methodId.equalsIgnoreCase("VOICE") ||  methodId.equalsIgnoreCase("SECURID_NEW_PIN") ||  methodId.equalsIgnoreCase("SECURID_NEWPIN") || methodId.equalsIgnoreCase("SECURID_NEXT_TOKENCODE")) {
 			Map<String, Object> contextBody = new LinkedHashMap<String, Object>(1);
 			contextBody.put("name", methodId);
 			contextBody.put("value", value);
@@ -718,7 +722,8 @@ public class SecurID extends AbstractDecisionNode {
 					thisOne.equalsIgnoreCase("Voice Tokencode") ||
 					thisOne.equalsIgnoreCase("SMS Tokencode") ||
 					thisOne.equalsIgnoreCase("SECURID_NEWPIN") ||
-					thisOne.equalsIgnoreCase("SECURID"))) {
+					thisOne.equalsIgnoreCase("SECURID") ||
+					thisOne.equalsIgnoreCase("SECURID_NEXT_TOKENCODE"))) {
 					if (retVal.size()>0 && thisJO.get("priority")!=JSONObject.NULL) {
 						//need to put higher priority first 
 						int thisPriority = thisJO.getInt("priority");
