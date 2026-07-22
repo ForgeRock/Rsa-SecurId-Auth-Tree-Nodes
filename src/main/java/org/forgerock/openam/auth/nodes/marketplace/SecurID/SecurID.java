@@ -124,18 +124,21 @@ public class SecurID extends AbstractDecisionNode {
 			NodeState ns = context.getStateFor(this);
 			if (!context.hasCallbacks()) {
 				// First time here. Initialize and display choice. Considered step 0
+				logger.error(loggerPrefix + "process() - no callbacks present, starting initialization");
 
 				// first get the response from the call
 				JSONObject fromPost = doInitialize(context);
-				
+
 				return startChoice(fromPost, ns);
-				
+
 			} else {
 				// check if we just came from step 0, which indicates the user has selected there MFA path
 				// otherwise, we are already on a MFA path and either verifying or waiting for a push completion
+				logger.error(loggerPrefix + "process() - callbacks present, P1ProtectStep: " + ns.get("P1ProtectStep").asString());
 
 				// check if they hit cancel button first.
 				if (cancelPushed(context, ns)) {
+					logger.error(loggerPrefix + "process() - cancel pushed, going to CANCEL");
 					cleanSS(ns);
 					return Action.goTo(CANCEL).build();
 				}
@@ -143,48 +146,59 @@ public class SecurID extends AbstractDecisionNode {
 				switch (ns.get("P1ProtectStep").asInteger().intValue()) {
 				case 0:// they just picked which MFA they want to use put them on the right path
 						// depending on choice, we need to show them either input screen or make the push and show a spinner, or QR code and set P1ProtectStep accordingly
+					logger.error(loggerPrefix + "process() - switch case 0 (MFA choice selection)");
 					List<Callback> choiceSelectedCallbacks = choiceSelected(context, ns);
 					return Action.send(choiceSelectedCallbacks).build();
-				case 1:// they went with RSA SecurID or Athenticate Tokencode or emergency 
+				case 1:// they went with RSA SecurID or Athenticate Tokencode or emergency
 						// we just got back here, so that means they sent us a token
-					JSONObject result = checkToken(context);					
-					
+					logger.error(loggerPrefix + "process() - switch case 1 (tokencode input)");
+					JSONObject result = checkToken(context);
+
 					if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {
+						logger.error(loggerPrefix + "process() - case 1 SUCCESS, attemptResponseCode: " + result.getString("attemptResponseCode"));
 						cleanSS(ns);
 						return Action.goTo(SUCCESS).build();
-					} 
-					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE")&& 
+					}
+					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE")&&
 							result.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("SUCCESS")) {
+						logger.error(loggerPrefix + "process() - case 1 CHALLENGE with method SUCCESS, attemptResponseCode: " + result.getString("attemptResponseCode"));
 						return startChoice(result, ns);
 					}
 					else {
 						// TODO if here, then they failed token match. Give another chance? For now, I'm sending to failure
+						logger.error(loggerPrefix + "process() - case 1 FAILURE, attemptResponseCode: " + result.getString("attemptResponseCode"));
 						cleanSS(ns);
 						return Action.goTo(FAILURE).build();
 					}
 				case 2:// they went with Approve or Device Biometrics
 						// we just got back here, so that means the poll wait timed out
+					logger.error(loggerPrefix + "process() - switch case 2 (push/biometrics approval)");
 					return checkApproval(ns, 2, ns.get("p1Choice").asString());
 
 				case 3:// they went with QR code
 						// we just got back here, so that means the poll wait timed out
+					logger.error(loggerPrefix + "process() - switch case 3 (QR code)");
 					return checkApproval(ns, 3, ns.get("p1Choice").asString());
 
 				case 4:// they went with Voice or SMS
+					logger.error(loggerPrefix + "process() - switch case 4 (Voice/SMS tokencode)");
 					result = checkToken(context);
 					if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {
+						logger.error(loggerPrefix + "process() - case 4 SUCCESS, attemptResponseCode: " + result.getString("attemptResponseCode"));
 						cleanSS(ns);
 						return Action.goTo(SUCCESS).build();
-					} 
-					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE") && 
+					}
+					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE") &&
 							result.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("SUCCESS")) {
+						logger.error(loggerPrefix + "process() - case 4 CHALLENGE with method SUCCESS, attemptResponseCode: " + result.getString("attemptResponseCode"));
 						startChoice(result, ns);
 					}
 					else {
 						// TODO if here, then they failed token match. Give another chance? For now, I'm sending to failure
+						logger.error(loggerPrefix + "process() - case 4 FAILURE, attemptResponseCode: " + result.getString("attemptResponseCode"));
 						cleanSS(ns);
 						return Action.goTo(FAILURE).build();
-					} 
+					}
 				}
 
 				// TODO how do we test if Not Supported?
