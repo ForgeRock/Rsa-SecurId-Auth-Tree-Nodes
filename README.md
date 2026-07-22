@@ -298,9 +298,6 @@ Authentication nodes as alternatives.</p>
 </div>
 </li>
 <li>
-<p>SecurID tokens are not supported in Next Tokencode mode.</p>
-</li>
-<li>
 <p>RSA API returns multiple authentication options when only the New
 PIN mode option should be returned. This situation occurs when all
 these conditions are met:</p>
