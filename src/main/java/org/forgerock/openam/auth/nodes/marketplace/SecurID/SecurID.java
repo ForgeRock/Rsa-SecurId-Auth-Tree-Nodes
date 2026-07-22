@@ -220,23 +220,26 @@ public class SecurID extends AbstractDecisionNode {
 	
 	
 	private Action startChoice(JSONObject fromPost, NodeState ns) throws Exception{
-		
+
 		// now check if MFA needed
 		if (!isMFANeeded(fromPost)) {
+			logger.error(loggerPrefix + "startChoice() - MFA not needed, going to SUCCESS");
 			cleanSS(ns);
 			return Action.goTo(SUCCESS).build();
 		}
-		
+
 		// determine if user is registered for at least one MFA
 		ArrayList<String> choices = getChoices(fromPost);
 		choices.trimToSize();
 		if (choices.size() == 0) {
+			logger.error(loggerPrefix + "startChoice() - no choices found, going to NOTENROLLED");
 			cleanSS(ns);
 			return Action.goTo(NOTENROLLED).build();
 		}
 
 		// if users only has one MFA choice, go to that choice and start next step after initialize
 		if (choices.size() == 1) {
+			logger.error(loggerPrefix + "startChoice() - single choice auto-selected: " + choices.get(0));
 			ns.putShared("inResponseTo", getDataFromContext(fromPost, "messageId"));
 			ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
 			ns.putShared("p1Choice", choices.get(0));
@@ -245,13 +248,15 @@ public class SecurID extends AbstractDecisionNode {
 		}
 
 		// if here, then user has at least two MFA choice enrolled. We need to let them choose which one
+		logger.error(loggerPrefix + "startChoice() - multiple choices presented, count: " + choices.size());
 		List<Callback> callbacks = completeInitialize(ns, choices, fromPost);
 		return Action.send(callbacks).build();
-		
+
 	}
 	
 
 	private Action checkApproval(NodeState ns, int step, String theChoice) throws Exception {
+		logger.error(loggerPrefix + "checkApproval() - entry, step: " + step + ", theChoice: " + theChoice);
 		Action retVal = null;
 
 		List<Callback> callbacks = new ArrayList<>();
@@ -267,20 +272,24 @@ public class SecurID extends AbstractDecisionNode {
 		ns.putShared("PingReferenceId", getPushRef(fromPost, theChoice));
 
 		if (fromPost.getString("attemptResponseCode")!=null && fromPost.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {// check if fromPost has success
+			logger.error(loggerPrefix + "checkApproval() - SUCCESS, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
 			cleanSS(ns);
 			retVal = Action.goTo(SUCCESS).build();
-			
+
 		}
-		
-		else if (fromPost.getString("attemptResponseCode") != null && fromPost.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE") && 
+
+		else if (fromPost.getString("attemptResponseCode") != null && fromPost.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE") &&
 				 fromPost.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("SUCCESS")) {
+			logger.error(loggerPrefix + "checkApproval() - CHALLENGE with method SUCCESS, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
 			startChoice(fromPost, ns);
 		}
 		else if (fromPost.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("fail")) {
+			logger.error(loggerPrefix + "checkApproval() - FAILURE, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
 			cleanSS(ns);
 			retVal = Action.goTo(FAILURE).build();
 		}
 		else {
+			logger.error(loggerPrefix + "checkApproval() - still pending, polling, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
 			if (step == 3) {
 				String url = getQRURL(fromPost);
 				callbacks.add(generateQRCallback(url));
@@ -349,6 +358,7 @@ public class SecurID extends AbstractDecisionNode {
 		JsonValue theBody = new JsonValue(new LinkedHashMap<String, Object>(1));
 		theBody.put("context", theContextBody);
 		String theChoice = ns.get("p1Choice").asString();
+		logger.error(loggerPrefix + "checkToken() - verifying choice: " + theChoice);
 
 		String token = "";
 		for (Iterator<? extends Callback> thisIt = context.getAllCallbacks().iterator(); thisIt.hasNext();) {
@@ -388,6 +398,7 @@ public class SecurID extends AbstractDecisionNode {
 		post.setEntity(new StringEntity(theBody.toString()));
 
 		JSONObject jo = doPost(post);
+		logger.error(loggerPrefix + "checkToken() - doPost returned, attemptResponseCode: " + jo.getString("attemptResponseCode"));
 		return jo;
 	}
 
