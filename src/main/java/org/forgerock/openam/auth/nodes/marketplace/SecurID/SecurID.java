@@ -120,6 +120,7 @@ public class SecurID extends AbstractDecisionNode {
 
 	@Override
 	public Action process(TreeContext context) {
+		logger.error(loggerPrefix + "process: entry - hasCallbacks=" + context.hasCallbacks());
 		try {
 			NodeState ns = context.getStateFor(this);
 			if (!context.hasCallbacks()) {
@@ -127,9 +128,10 @@ public class SecurID extends AbstractDecisionNode {
 
 				// first get the response from the call
 				JSONObject fromPost = doInitialize(context);
-				
+
+				logger.error(loggerPrefix + "process: exit - returning startChoice result (no callbacks)");
 				return startChoice(fromPost, ns);
-				
+
 			} else {
 				// check if we just came from step 0, which indicates the user has selected there MFA path
 				// otherwise, we are already on a MFA path and either verifying or waiting for a push completion
@@ -137,6 +139,7 @@ public class SecurID extends AbstractDecisionNode {
 				// check if they hit cancel button first.
 				if (cancelPushed(context, ns)) {
 					cleanSS(ns);
+					logger.error(loggerPrefix + "process: exit - returning CANCEL");
 					return Action.goTo(CANCEL).build();
 				}
 
@@ -144,47 +147,55 @@ public class SecurID extends AbstractDecisionNode {
 				case 0:// they just picked which MFA they want to use put them on the right path
 						// depending on choice, we need to show them either input screen or make the push and show a spinner, or QR code and set P1ProtectStep accordingly
 					List<Callback> choiceSelectedCallbacks = choiceSelected(context, ns);
+					logger.error(loggerPrefix + "process: exit - returning send callbacks (step 0)");
 					return Action.send(choiceSelectedCallbacks).build();
-				case 1:// they went with RSA SecurID or Athenticate Tokencode or emergency 
+				case 1:// they went with RSA SecurID or Athenticate Tokencode or emergency
 						// we just got back here, so that means they sent us a token
-					JSONObject result = checkToken(context);					
-					
+					JSONObject result = checkToken(context);
+
 					if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {
 						cleanSS(ns);
+						logger.error(loggerPrefix + "process: exit - returning SUCCESS (step 1)");
 						return Action.goTo(SUCCESS).build();
-					} 
-					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE")&& 
+					}
+					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE")&&
 							result.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("SUCCESS")) {
+						logger.error(loggerPrefix + "process: exit - returning startChoice result (step 1 CHALLENGE)");
 						return startChoice(result, ns);
 					}
 					else {
 						// TODO if here, then they failed token match. Give another chance? For now, I'm sending to failure
 						cleanSS(ns);
+						logger.error(loggerPrefix + "process: exit - returning FAILURE (step 1)");
 						return Action.goTo(FAILURE).build();
 					}
 				case 2:// they went with Approve or Device Biometrics
 						// we just got back here, so that means the poll wait timed out
+					logger.error(loggerPrefix + "process: exit - returning checkApproval result (step 2)");
 					return checkApproval(ns, 2, ns.get("p1Choice").asString());
 
 				case 3:// they went with QR code
 						// we just got back here, so that means the poll wait timed out
+					logger.error(loggerPrefix + "process: exit - returning checkApproval result (step 3)");
 					return checkApproval(ns, 3, ns.get("p1Choice").asString());
 
 				case 4:// they went with Voice or SMS
 					result = checkToken(context);
 					if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {
 						cleanSS(ns);
+						logger.error(loggerPrefix + "process: exit - returning SUCCESS (step 4)");
 						return Action.goTo(SUCCESS).build();
-					} 
-					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE") && 
+					}
+					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE") &&
 							result.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("SUCCESS")) {
 						startChoice(result, ns);
 					}
 					else {
 						// TODO if here, then they failed token match. Give another chance? For now, I'm sending to failure
 						cleanSS(ns);
+						logger.error(loggerPrefix + "process: exit - returning FAILURE (step 4)");
 						return Action.goTo(FAILURE).build();
-					} 
+					}
 				}
 
 				// TODO how do we test if Not Supported?
@@ -200,24 +211,28 @@ public class SecurID extends AbstractDecisionNode {
 			return Action.goTo(ERROR).withHeader("Error occurred").withErrorMessage(ex.getMessage()).build();
 		}
 
+		logger.error(loggerPrefix + "process: exit - returning ERROR (fall-through)");
 		return Action.goTo(ERROR).build();
 	}
 	
 	
 	
 	private Action startChoice(JSONObject fromPost, NodeState ns) throws Exception{
-		
+		logger.error(loggerPrefix + "startChoice: entry");
+
 		// now check if MFA needed
 		if (!isMFANeeded(fromPost)) {
 			cleanSS(ns);
+			logger.error(loggerPrefix + "startChoice: exit - returning SUCCESS (MFA not needed)");
 			return Action.goTo(SUCCESS).build();
 		}
-		
+
 		// determine if user is registered for at least one MFA
 		ArrayList<String> choices = getChoices(fromPost);
 		choices.trimToSize();
 		if (choices.size() == 0) {
 			cleanSS(ns);
+			logger.error(loggerPrefix + "startChoice: exit - returning NOTENROLLED (no choices)");
 			return Action.goTo(NOTENROLLED).build();
 		}
 
@@ -227,17 +242,20 @@ public class SecurID extends AbstractDecisionNode {
 			ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
 			ns.putShared("p1Choice", choices.get(0));
 			List<Callback> callbacks = choiceSelectedHelper(choices.get(0), ns);
+			logger.error(loggerPrefix + "startChoice: exit - returning send callbacks (single choice: " + choices.get(0) + ")");
 			return Action.send(callbacks).build();
 		}
 
 		// if here, then user has at least two MFA choice enrolled. We need to let them choose which one
 		List<Callback> callbacks = completeInitialize(ns, choices, fromPost);
+		logger.error(loggerPrefix + "startChoice: exit - returning send callbacks (multiple choices: " + choices.size() + ")");
 		return Action.send(callbacks).build();
-		
+
 	}
 	
 
 	private Action checkApproval(NodeState ns, int step, String theChoice) throws Exception {
+		logger.error(loggerPrefix + "checkApproval: entry - step=" + step + " theChoice=" + theChoice);
 		Action retVal = null;
 
 		List<Callback> callbacks = new ArrayList<>();
@@ -255,10 +273,10 @@ public class SecurID extends AbstractDecisionNode {
 		if (fromPost.getString("attemptResponseCode")!=null && fromPost.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {// check if fromPost has success
 			cleanSS(ns);
 			retVal = Action.goTo(SUCCESS).build();
-			
+
 		}
-		
-		else if (fromPost.getString("attemptResponseCode") != null && fromPost.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE") && 
+
+		else if (fromPost.getString("attemptResponseCode") != null && fromPost.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE") &&
 				 fromPost.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("SUCCESS")) {
 			startChoice(fromPost, ns);
 		}
@@ -283,11 +301,13 @@ public class SecurID extends AbstractDecisionNode {
 			retVal = Action.send(callbacks).build();
 		}
 
+		logger.error(loggerPrefix + "checkApproval: exit - retVal outcome (step=" + step + ")");
 		return retVal;
 	}
 
 	// TODO Need to make these a bit more unique.
 	private void cleanSS(NodeState ns) {
+		logger.error(loggerPrefix + "cleanSS: entry");
 		ns.remove("p1Choice");
 		ns.remove("P1choices");
 		ns.remove("P1ProtectStep");
@@ -295,19 +315,23 @@ public class SecurID extends AbstractDecisionNode {
 		ns.remove("inResponseTo");
 		ns.remove("authnAttemptId");
 		ns.remove("PingReferenceId");
+		logger.error(loggerPrefix + "cleanSS: exit");
 	}
 
 	private boolean isMFANeeded(JSONObject fromPost) throws Exception {
+		logger.error(loggerPrefix + "isMFANeeded: entry");
 		boolean retVal = true;
 
 		String attemptResponseCode = fromPost.getString("attemptResponseCode");
 		if (attemptResponseCode.equalsIgnoreCase("SUCCESS"))
 			retVal = false;
 
+		logger.error(loggerPrefix + "isMFANeeded: exit - retVal=" + retVal);
 		return retVal;
 	}
 
 	private boolean cancelPushed(TreeContext context, NodeState ns) {
+		logger.error(loggerPrefix + "cancelPushed: entry");
 		boolean retVal = false;
 		JsonValue jv = ns.get("confirmationCB");
 		for (Iterator<? extends Callback> thisIt = context.getAllCallbacks().iterator(); thisIt.hasNext();) {
@@ -324,10 +348,12 @@ public class SecurID extends AbstractDecisionNode {
 				break;
 			}
 		}
+		logger.error(loggerPrefix + "cancelPushed: exit - retVal=" + retVal);
 		return retVal;
 	}
 
 	private JSONObject checkToken(TreeContext context) throws Exception {
+		logger.error(loggerPrefix + "checkToken: entry");
 		NodeState ns = context.getStateFor(this);
 
 		HttpPost post = new HttpPost(config.baseURL() + verifyAppend);
@@ -349,7 +375,7 @@ public class SecurID extends AbstractDecisionNode {
 				token = String.copyValueOf(pc.getPassword());
 				break;
 			}
-			
+
 		}
 
 		if (theChoice.equalsIgnoreCase("Emergency Tokencode"))
@@ -374,10 +400,12 @@ public class SecurID extends AbstractDecisionNode {
 		post.setEntity(new StringEntity(theBody.toString()));
 
 		JSONObject jo = doPost(post);
+		logger.error(loggerPrefix + "checkToken: exit - theChoice=" + theChoice);
 		return jo;
 	}
 
 	private List<Callback> choiceSelected(TreeContext context, NodeState ns) throws Exception {
+		logger.error(loggerPrefix + "choiceSelected: entry");
 		// they just picked which MFA they want to use put them on the right path
 		// depending on choice, we need to show them either input screen or make the push and show a spinner, or QR code and set P1ProtectStep accordingly
 		List<Callback> callbacks = new ArrayList<>();
@@ -396,10 +424,12 @@ public class SecurID extends AbstractDecisionNode {
 				break;
 			}
 		}
+		logger.error(loggerPrefix + "choiceSelected: exit - callbacks.size=" + callbacks.size());
 		return callbacks;
 	}
 
 	private List<Callback> choiceSelectedHelper(String theChoice, NodeState ns) throws Exception {
+		logger.error(loggerPrefix + "choiceSelectedHelper: entry - theChoice=" + theChoice);
 		List<Callback> callbacks = new ArrayList<>();
 		switch (theChoice) {
 		case "RSA SecurID":
@@ -425,46 +455,50 @@ public class SecurID extends AbstractDecisionNode {
 			// need to show them a QR code and a wait till done
 			callbacks.addAll(pushSetup(theChoice, ns, 3));
 			break;
-			
+
 		case "Voice Tokencode":
 		case "SMS Tokencode":
 			callbacks.addAll(vOrSSetup(theChoice, ns, 4));
 			break;
 		}
+		logger.error(loggerPrefix + "choiceSelectedHelper: exit - callbacks.size=" + callbacks.size());
 		return callbacks;
 	}
 	
 	private List<Callback> vOrSSetup(String theChoice, NodeState ns, int step) throws Exception{
+		logger.error(loggerPrefix + "vOrSSetup: entry - theChoice=" + theChoice + " step=" + step);
 		List<Callback> callbacks = new ArrayList<>();
-		
+
 		ns.putShared("confirmationCB", confirmationCallback.getOptions());
 		ns.putShared("P1ProtectStep", step);
 		HttpPost post = new HttpPost(config.baseURL() + verifyAppend);
 		JsonValue theContextBody = getContext(ns.get("inResponseTo").asString(), ns.get("authnAttemptId").asString());
 		JsonValue theBody = new JsonValue(new LinkedHashMap<String, Object>(1));
 		theBody.put("context", theContextBody);
-		
+
 		if (theChoice.equalsIgnoreCase("SMS Tokencode"))
 			theBody.add("subjectCredentials", getSubCredVOrS("SMS"));
-		
+
 		if (theChoice.equalsIgnoreCase("Voice Tokencode"))
 			theBody.add("subjectCredentials", getSubCredVOrS("VOICE"));
-		
+
 		post.setEntity(new StringEntity(theBody.toString()));
 		// Send init call to SecurID
 		JSONObject fromPost = doPost(post);
 		ns.putShared("inResponseTo", getDataFromContext(fromPost, "messageId"));
 		ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
-		
+
 		//StringAttributeInputCallback tokenCode = new StringAttributeInputCallback("smsvoiceToken", theChoice, null, true);
 		PasswordCallback pc = new PasswordCallback(theChoice, true);
-		
+
 		callbacks.add(pc);
 		callbacks.add(confirmationCallback);
+		logger.error(loggerPrefix + "vOrSSetup: exit - callbacks.size=" + callbacks.size());
 		return callbacks;
 	}
 
 	private List<Callback> pushSetup(String theChoice, NodeState ns, int step) throws Exception {
+		logger.error(loggerPrefix + "pushSetup: entry - theChoice=" + theChoice + " step=" + step);
 		List<Callback> callbacks = new ArrayList<>();
 
 		ns.putShared("confirmationCB", confirmationCancelCallback.getOptions());
@@ -488,10 +522,12 @@ public class SecurID extends AbstractDecisionNode {
 		confirmationCancelCallback.setSelectedIndex(100);// so cancel doesnt looked pressed by default
 		callbacks.add(confirmationCancelCallback);
 
+		logger.error(loggerPrefix + "pushSetup: exit - callbacks.size=" + callbacks.size());
 		return callbacks;
 	}
 
 	private String getPushRef(JSONObject fromPost, String theChoice) {
+		logger.error(loggerPrefix + "getPushRef: entry - theChoice=" + theChoice);
 		String retVal = "";
 
 		JSONArray theChallenges = fromPost.getJSONObject("challengeMethods").getJSONArray("challenges");
@@ -503,18 +539,26 @@ public class SecurID extends AbstractDecisionNode {
 				break;
 			}
 		}
+		logger.error(loggerPrefix + "getPushRef: exit - retVal=" + retVal);
 		return retVal;
 	}
 
 	private String getQRURL(JSONObject fromPost) {
-		return fromPost.getJSONArray("credentialValidationResults").getJSONObject(0).getJSONArray("authnAttributes").getJSONObject(0).getString("value");
+		logger.error(loggerPrefix + "getQRURL: entry");
+		String retVal = fromPost.getJSONArray("credentialValidationResults").getJSONObject(0).getJSONArray("authnAttributes").getJSONObject(0).getString("value");
+		logger.error(loggerPrefix + "getQRURL: exit - URL retrieved");
+		return retVal;
 	}
 
 	private Callback generateQRCallback(String text) {
-		return new ScriptTextOutputCallback(GenerationUtils.getQRCodeGenerationJavascriptForAuthenticatorAppRegistration("callback_0", text));
+		logger.error(loggerPrefix + "generateQRCallback: entry");
+		Callback retVal = new ScriptTextOutputCallback(GenerationUtils.getQRCodeGenerationJavascriptForAuthenticatorAppRegistration("callback_0", text));
+		logger.error(loggerPrefix + "generateQRCallback: exit - QR callback generated");
+		return retVal;
 	}
 
 	private JSONObject makePushPost(NodeState ns, String theChoice, String refID) throws Exception {
+		logger.error(loggerPrefix + "makePushPost: entry - theChoice=" + theChoice + " refID=" + refID);
 		// need to send verify
 		HttpPost post = new HttpPost(config.baseURL() + verifyAppend);
 		JsonValue theContextBody = getContext(ns.get("inResponseTo").asString(), ns.get("authnAttemptId").asString());
@@ -529,10 +573,13 @@ public class SecurID extends AbstractDecisionNode {
 
 		post.setEntity(new StringEntity(theBody.toString()));
 		// Send init call to SecurID
-		return doPost(post);
+		JSONObject retVal = doPost(post);
+		logger.error(loggerPrefix + "makePushPost: exit - response received");
+		return retVal;
 	}
 
 	private JSONArray getSubCred(String methodId, String value) {
+		logger.error(loggerPrefix + "getSubCred: entry - methodId=" + methodId + " value=[REDACTED]");
 		Map<String, Object> theMethMap = new LinkedHashMap<String, Object>(1);
 		theMethMap.put("methodId", methodId);
 		JSONArray subCreds = new JSONArray();
@@ -552,11 +599,13 @@ public class SecurID extends AbstractDecisionNode {
 		}
 
 		subCreds.put(theMethMap);
+		logger.error(loggerPrefix + "getSubCred: exit - methodId=" + methodId + " subCreds.length=" + subCreds.length());
 		return subCreds;
 	}
 	
 	
 	private JSONArray getSubCredVOrS(String methodId) {
+		logger.error(loggerPrefix + "getSubCredVOrS: entry - methodId=" + methodId);
 		Map<String, Object> theMethMap = new LinkedHashMap<String, Object>(1);
 		theMethMap.put("methodId", methodId);
 		JSONArray subCreds = new JSONArray();
@@ -568,11 +617,13 @@ public class SecurID extends AbstractDecisionNode {
 		theMethMap.put("collectedInputs", collectedInputs);
 
 		subCreds.put(theMethMap);
+		logger.error(loggerPrefix + "getSubCredVOrS: exit - methodId=" + methodId + " subCreds.length=" + subCreds.length());
 		return subCreds;
 	}
 	
 
 	private JSONObject doInitialize(TreeContext context) throws Exception {
+		logger.error(loggerPrefix + "doInitialize: entry - username=[USERNAME]");
 		NodeState ns = context.getStateFor(this);
 		String username = ns.get("username").asString();
 		if (StringUtils.isEmpty(username)) {
@@ -585,11 +636,13 @@ public class SecurID extends AbstractDecisionNode {
 
 		// Send init call to SecurID
 		JSONObject fromPost = doPost(post);
+		logger.error(loggerPrefix + "doInitialize: exit - username=[USERNAME] response received");
 		return fromPost;
 
 	}
 
 	private List<Callback> completeInitialize(NodeState ns, ArrayList<String> choices, JSONObject fromPost) throws Exception {
+		logger.error(loggerPrefix + "completeInitialize: entry - choices.size=" + choices.size());
 		// Save things to TransientState
 		ns.putShared("inResponseTo", getDataFromContext(fromPost, "messageId"));
 		ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
@@ -605,10 +658,12 @@ public class SecurID extends AbstractDecisionNode {
 		callbacks.add(cc);
 		callbacks.add(confirmationCallback);
 		ns.putShared("confirmationCB", confirmationCallback.getOptions());
+		logger.error(loggerPrefix + "completeInitialize: exit - callbacks.size=" + callbacks.size());
 		return callbacks;
 	}
 
 	private JsonValue getInitializeBody(String clientID, String subject, String assurance) {
+		logger.error(loggerPrefix + "getInitializeBody: entry - clientID=" + clientID + " subject=[USERNAME] assurance=" + assurance);
 
 		JsonValue body = new JsonValue(new LinkedHashMap<String, Object>(1));
 
@@ -623,25 +678,31 @@ public class SecurID extends AbstractDecisionNode {
 
 		body.put("context", contextBody);
 
+		logger.error(loggerPrefix + "getInitializeBody: exit - body built for subject=[USERNAME]");
 		return body;
 
 	}
 
 	private JsonValue getContext(String inResponseTo, String authnAttemptId) {
+		logger.error(loggerPrefix + "getContext: entry - inResponseTo=" + inResponseTo + " authnAttemptId=" + authnAttemptId);
 		JsonValue contextBody = new JsonValue(new LinkedHashMap<String, Object>(1));
 		contextBody.put("authnAttemptId", authnAttemptId);
 		contextBody.put("messageId", UUID.randomUUID().toString());
 		contextBody.put("inResponseTo", inResponseTo);
+		logger.error(loggerPrefix + "getContext: exit - contextBody built");
 		return contextBody;
 	}
 
 	private String getDataFromContext(JSONObject data, String key) {
+		logger.error(loggerPrefix + "getDataFromContext: entry - key=" + key);
 		JSONObject theContext = data.getJSONObject("context");
 		String returnValue = theContext.getString(key);
+		logger.error(loggerPrefix + "getDataFromContext: exit - key=" + key + " returnValue=" + returnValue);
 		return returnValue;
 	}
 
 	private JSONObject doPost(HttpPost post) throws Exception {
+		logger.error(loggerPrefix + "doPost: entry - URI=" + post.getURI());
 		JSONObject retVal = null;
 		CloseableHttpClient httpClient = null;
 		try {
@@ -685,10 +746,12 @@ public class SecurID extends AbstractDecisionNode {
 			}
 		}
 
+		logger.error(loggerPrefix + "doPost: exit - response received");
 		return retVal;
 	}
 
 	private ArrayList<String> getChoices(JSONObject fromPost) {
+		logger.error(loggerPrefix + "getChoices: entry");
 		ArrayList<String> retVal = new ArrayList<String>();
 		int priority = 2;
 
@@ -741,6 +804,7 @@ public class SecurID extends AbstractDecisionNode {
 			}
 
 		}
+		logger.error(loggerPrefix + "getChoices: exit - retVal.size=" + retVal.size());
 		return retVal;
 	}
 
