@@ -611,6 +611,7 @@ public class SecurID extends AbstractDecisionNode {
 		NodeState ns = context.getStateFor(this);
 		String username = ns.get("username").asString();
 		if (StringUtils.isEmpty(username)) {
+			logger.error(loggerPrefix + "doInitialize() - username missing in shared state, throwing NodeProcessException");
 			throw new NodeProcessException("username does not exist in sharedsate");
 		}
 
@@ -620,6 +621,7 @@ public class SecurID extends AbstractDecisionNode {
 
 		// Send init call to SecurID
 		JSONObject fromPost = doPost(post);
+		logger.error(loggerPrefix + "doInitialize() - doPost returned, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
 		return fromPost;
 
 	}
@@ -701,6 +703,7 @@ public class SecurID extends AbstractDecisionNode {
 			}
 
 			HttpResponse response = httpClient.execute(post);
+			logger.error(loggerPrefix + "doPost() - URL: " + post.getURI().toString() + ", HTTP status: " + response.getStatusLine().getStatusCode());
 
 			HttpEntity entity = response.getEntity();
 			String content = EntityUtils.toString(entity);
@@ -772,10 +775,12 @@ public class SecurID extends AbstractDecisionNode {
 						priority = thisJO.getInt("priority");
 					}
 					retVal.add(thisOne);
+					logger.error(loggerPrefix + "getChoices() - added eligible choice: " + thisOne);
 				}
 			}
 
 		}
+		logger.error(loggerPrefix + "getChoices() - total eligible choices found: " + retVal.size());
 		return retVal;
 	}
 
