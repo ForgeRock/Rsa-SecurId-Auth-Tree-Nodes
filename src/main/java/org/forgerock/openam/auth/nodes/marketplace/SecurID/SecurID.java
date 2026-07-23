@@ -415,6 +415,7 @@ public class SecurID extends AbstractDecisionNode {
 				JsonValue jv = ns.get("P1choices");
 				List<String> theList = jv.asList(String.class);
 				theChoice = theList.get(cb.getSelectedIndexes()[0]);
+				logger.error(loggerPrefix + "choiceSelected() - user selected choice: " + theChoice);
 				ns.remove("P1choices");
 				ns.putShared("p1Choice", theChoice);
 				callbacks = choiceSelectedHelper(theChoice, ns);
@@ -425,6 +426,7 @@ public class SecurID extends AbstractDecisionNode {
 	}
 
 	private List<Callback> choiceSelectedHelper(String theChoice, NodeState ns) throws Exception {
+		logger.error(loggerPrefix + "choiceSelectedHelper() - routing choice: " + theChoice);
 		List<Callback> callbacks = new ArrayList<>();
 		switch (theChoice) {
 		case "RSA SecurID":
@@ -435,6 +437,7 @@ public class SecurID extends AbstractDecisionNode {
 		case "SECURID":
 		case "SECURID_NEXT_TOKENCODE":
 			// need to show them an input screen
+			logger.error(loggerPrefix + "choiceSelectedHelper() - entering tokencode input path for choice: " + theChoice);
 			String promptLabel = theChoice.equals("SECURID_NEXT_TOKENCODE") ? "Next Tokencode" : theChoice;
 			PasswordCallback pc = new PasswordCallback(promptLabel, true);
 			callbacks.add(pc);
@@ -444,15 +447,18 @@ public class SecurID extends AbstractDecisionNode {
 			break;
 		case "Device Biometrics":
 		case "Approve":
+			logger.error(loggerPrefix + "choiceSelectedHelper() - entering push/biometrics path for choice: " + theChoice);
 			callbacks.addAll(pushSetup(theChoice, ns, 2));
 			break;
 		case "QR Code":
 			// need to show them a QR code and a wait till done
+			logger.error(loggerPrefix + "choiceSelectedHelper() - entering QR code path for choice: " + theChoice);
 			callbacks.addAll(pushSetup(theChoice, ns, 3));
 			break;
-			
+
 		case "Voice Tokencode":
 		case "SMS Tokencode":
+			logger.error(loggerPrefix + "choiceSelectedHelper() - entering voice/SMS path for choice: " + theChoice);
 			callbacks.addAll(vOrSSetup(theChoice, ns, 4));
 			break;
 		}
@@ -460,24 +466,26 @@ public class SecurID extends AbstractDecisionNode {
 	}
 	
 	private List<Callback> vOrSSetup(String theChoice, NodeState ns, int step) throws Exception{
+		logger.error(loggerPrefix + "vOrSSetup() - entry, theChoice: " + theChoice + ", step: " + step);
 		List<Callback> callbacks = new ArrayList<>();
-		
+
 		ns.putShared("confirmationCB", confirmationCallback.getOptions());
 		ns.putShared("P1ProtectStep", step);
 		HttpPost post = new HttpPost(config.baseURL() + verifyAppend);
 		JsonValue theContextBody = getContext(ns.get("inResponseTo").asString(), ns.get("authnAttemptId").asString());
 		JsonValue theBody = new JsonValue(new LinkedHashMap<String, Object>(1));
 		theBody.put("context", theContextBody);
-		
+
 		if (theChoice.equalsIgnoreCase("SMS Tokencode"))
 			theBody.add("subjectCredentials", getSubCredVOrS("SMS"));
-		
+
 		if (theChoice.equalsIgnoreCase("Voice Tokencode"))
 			theBody.add("subjectCredentials", getSubCredVOrS("VOICE"));
-		
+
 		post.setEntity(new StringEntity(theBody.toString()));
 		// Send init call to SecurID
 		JSONObject fromPost = doPost(post);
+		logger.error(loggerPrefix + "vOrSSetup() - doPost returned, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
 		ns.putShared("inResponseTo", getDataFromContext(fromPost, "messageId"));
 		ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
 		
@@ -490,6 +498,7 @@ public class SecurID extends AbstractDecisionNode {
 	}
 
 	private List<Callback> pushSetup(String theChoice, NodeState ns, int step) throws Exception {
+		logger.error(loggerPrefix + "pushSetup() - entry, theChoice: " + theChoice + ", step: " + step);
 		List<Callback> callbacks = new ArrayList<>();
 
 		ns.putShared("confirmationCB", confirmationCancelCallback.getOptions());
@@ -500,6 +509,7 @@ public class SecurID extends AbstractDecisionNode {
 			ref = refJV.asString();
 		}
 		JSONObject fromPost = makePushPost(ns, theChoice, ref);
+		logger.error(loggerPrefix + "pushSetup() - makePushPost returned, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
 		ns.putShared("inResponseTo", getDataFromContext(fromPost, "messageId"));
 		ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
 		ns.putShared("PingReferenceId", getPushRef(fromPost, theChoice));
