@@ -73,9 +73,22 @@ public class SecurID extends AbstractDecisionNode {
 	private static final String initializeAppend = "/authn/initialize";
 	private static final String verifyAppend = "/authn/verify";
 
-	private static final ConfirmationCallback confirmationCallback = new ConfirmationCallback(ConfirmationCallback.INFORMATION, new String[] { "Next", "Cancel" }, 0);
-	private static final ConfirmationCallback confirmationCancelCallback = new ConfirmationCallback(ConfirmationCallback.INFORMATION, new String[] { "Cancel" }, 0);
-	
+	// Cap on how much of an RSA response body we put in a log line.
+	private static final int LOG_BODY_LIMIT = 2000;
+
+	// These used to be static finals, but ConfirmationCallback is mutable and setSelectedIndex()
+	// was being called on the shared instances. Two concurrent authentications could then see
+	// each other's button state. Build a fresh one per request instead.
+	private static ConfirmationCallback newNextCancelCallback() {
+		return new ConfirmationCallback(ConfirmationCallback.INFORMATION, new String[] { "Next", "Cancel" }, 0);
+	}
+
+	private static ConfirmationCallback newCancelOnlyCallback() {
+		ConfirmationCallback cb = new ConfirmationCallback(ConfirmationCallback.INFORMATION, new String[] { "Cancel" }, 0);
+		cb.setSelectedIndex(100);// so cancel doesnt looked pressed by default
+		return cb;
+	}
+
 	/**
 	 * Configuration for the node.
 	 */
@@ -111,6 +124,11 @@ public class SecurID extends AbstractDecisionNode {
 			return "Waiting for your response";
 		}
 
+		@Attribute(order = 800, validators = { RequiredValueValidator.class })
+		default String theNextTokencodePrompt() {
+			return "Wait for the code on your token to change, then enter the new code";
+		}
+
 	}
 
 	@Inject
@@ -124,7 +142,7 @@ public class SecurID extends AbstractDecisionNode {
 			NodeState ns = context.getStateFor(this);
 			if (!context.hasCallbacks()) {
 				// First time here. Initialize and display choice. Considered step 0
-				logger.error(loggerPrefix + "process() - no callbacks present, starting initialization");
+				logger.debug(loggerPrefix + "process() - no callbacks present, starting initialization");
 
 				// first get the response from the call
 				JSONObject fromPost = doInitialize(context);
@@ -134,11 +152,11 @@ public class SecurID extends AbstractDecisionNode {
 			} else {
 				// check if we just came from step 0, which indicates the user has selected there MFA path
 				// otherwise, we are already on a MFA path and either verifying or waiting for a push completion
-				logger.error(loggerPrefix + "process() - callbacks present, P1ProtectStep: " + ns.get("P1ProtectStep").asString());
+				logger.debug(loggerPrefix + "process() - callbacks present, P1ProtectStep: " + ns.get("P1ProtectStep").asInteger());
 
 				// check if they hit cancel button first.
 				if (cancelPushed(context, ns)) {
-					logger.error(loggerPrefix + "process() - cancel pushed, going to CANCEL");
+					logger.debug(loggerPrefix + "process() - cancel pushed, going to CANCEL");
 					cleanSS(ns);
 					return Action.goTo(CANCEL).build();
 				}
@@ -146,63 +164,36 @@ public class SecurID extends AbstractDecisionNode {
 				switch (ns.get("P1ProtectStep").asInteger().intValue()) {
 				case 0:// they just picked which MFA they want to use put them on the right path
 						// depending on choice, we need to show them either input screen or make the push and show a spinner, or QR code and set P1ProtectStep accordingly
-					logger.error(loggerPrefix + "process() - switch case 0 (MFA choice selection)");
+					logger.debug(loggerPrefix + "process() - switch case 0 (MFA choice selection)");
 					List<Callback> choiceSelectedCallbacks = choiceSelected(context, ns);
 					return Action.send(choiceSelectedCallbacks).build();
 				case 1:// they went with RSA SecurID or Athenticate Tokencode or emergency
 						// we just got back here, so that means they sent us a token
-					logger.error(loggerPrefix + "process() - switch case 1 (tokencode input)");
-					JSONObject result = checkToken(context);
+					logger.debug(loggerPrefix + "process() - switch case 1 (tokencode input)");
+					return handleTokenVerifyResult(checkToken(context), ns, 1);
 
-					if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {
-						logger.error(loggerPrefix + "process() - case 1 SUCCESS, attemptResponseCode: " + result.getString("attemptResponseCode"));
-						cleanSS(ns);
-						return Action.goTo(SUCCESS).build();
-					}
-					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE")&&
-							result.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("SUCCESS")) {
-						logger.error(loggerPrefix + "process() - case 1 CHALLENGE with method SUCCESS, attemptResponseCode: " + result.getString("attemptResponseCode"));
-						return startChoice(result, ns);
-					}
-					else {
-						// TODO if here, then they failed token match. Give another chance? For now, I'm sending to failure
-						logger.error(loggerPrefix + "process() - case 1 FAILURE, attemptResponseCode: " + result.getString("attemptResponseCode"));
-						cleanSS(ns);
-						return Action.goTo(FAILURE).build();
-					}
 				case 2:// they went with Approve or Device Biometrics
 						// we just got back here, so that means the poll wait timed out
-					logger.error(loggerPrefix + "process() - switch case 2 (push/biometrics approval)");
+					logger.debug(loggerPrefix + "process() - switch case 2 (push/biometrics approval)");
 					return checkApproval(ns, 2, ns.get("p1Choice").asString());
 
 				case 3:// they went with QR code
 						// we just got back here, so that means the poll wait timed out
-					logger.error(loggerPrefix + "process() - switch case 3 (QR code)");
+					logger.debug(loggerPrefix + "process() - switch case 3 (QR code)");
 					return checkApproval(ns, 3, ns.get("p1Choice").asString());
 
 				case 4:// they went with Voice or SMS
-					logger.error(loggerPrefix + "process() - switch case 4 (Voice/SMS tokencode)");
-					result = checkToken(context);
-					if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {
-						logger.error(loggerPrefix + "process() - case 4 SUCCESS, attemptResponseCode: " + result.getString("attemptResponseCode"));
-						cleanSS(ns);
-						return Action.goTo(SUCCESS).build();
-					}
-					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE") &&
-							result.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("SUCCESS")) {
-						logger.error(loggerPrefix + "process() - case 4 CHALLENGE with method SUCCESS, attemptResponseCode: " + result.getString("attemptResponseCode"));
-						startChoice(result, ns);
-					}
-					else {
-						// TODO if here, then they failed token match. Give another chance? For now, I'm sending to failure
-						logger.error(loggerPrefix + "process() - case 4 FAILURE, attemptResponseCode: " + result.getString("attemptResponseCode"));
-						cleanSS(ns);
-						return Action.goTo(FAILURE).build();
-					}
+					logger.debug(loggerPrefix + "process() - switch case 4 (Voice/SMS tokencode)");
+					return handleTokenVerifyResult(checkToken(context), ns, 4);
+
+				default:
+					logger.error(loggerPrefix + "process() - unrecognised P1ProtectStep: "
+							+ ns.get("P1ProtectStep").asInteger() + ", going to ERROR");
+					cleanSS(ns);
+					return Action.goTo(ERROR).build();
 				}
-
-				// TODO how do we test if Not Supported?
-
+				// Every switch branch returns, including default, so there is no fall-through to a
+				// trailing ERROR any more -- an unhandled step is named in the log instead.
 			}
 
 		} catch (Exception ex) {
@@ -213,33 +204,54 @@ public class SecurID extends AbstractDecisionNode {
 			context.getStateFor(this).putTransient(loggerPrefix + "StackTrace", new Date() + ": " + stackTrace);
 			return Action.goTo(ERROR).withHeader("Error occurred").withErrorMessage(ex.getMessage()).build();
 		}
-
-		return Action.goTo(ERROR).build();
 	}
 	
 	
 	
 	private Action startChoice(JSONObject fromPost, NodeState ns) throws Exception{
 
+		String attemptCode = fromPost.optString("attemptResponseCode", null);
+		logger.debug(loggerPrefix + "startChoice() - entry, attemptResponseCode: " + attemptCode
+				+ ", methodResponseCode: " + methodResponseCode(fromPost));
+
+		if (attemptCode == null) {
+			logger.error(loggerPrefix + "startChoice() - no attemptResponseCode in response, going to ERROR. Response: "
+					+ bodyForLog(fromPost));
+			cleanSS(ns);
+			return Action.goTo(ERROR).build();
+		}
+
 		// now check if MFA needed
-		if (!isMFANeeded(fromPost)) {
-			logger.error(loggerPrefix + "startChoice() - MFA not needed, going to SUCCESS");
+		if (attemptCode.equalsIgnoreCase("SUCCESS")) {
+			logger.debug(loggerPrefix + "startChoice() - MFA not needed, going to SUCCESS");
 			cleanSS(ns);
 			return Action.goTo(SUCCESS).build();
+		}
+
+		// RSA refused the attempt outright -- unknown user, disabled or unassigned token,
+		// locked account, policy denial. This used to fall through to the choice lookup, which
+		// then found zero choices and reported NOTENROLLED. That sends the journey down the
+		// wrong branch and hides the real reason, so call it what it is.
+		if (attemptCode.equalsIgnoreCase("FAIL")) {
+			logger.error(loggerPrefix + "startChoice() - RSA rejected the attempt. attemptResponseCode: " + attemptCode
+					+ ", methodResponseCode: " + methodResponseCode(fromPost) + ", response: " + bodyForLog(fromPost));
+			cleanSS(ns);
+			return Action.goTo(FAILURE).build();
 		}
 
 		// determine if user is registered for at least one MFA
 		ArrayList<String> choices = getChoices(fromPost);
 		choices.trimToSize();
 		if (choices.size() == 0) {
-			logger.error(loggerPrefix + "startChoice() - no choices found, going to NOTENROLLED");
+			logger.error(loggerPrefix + "startChoice() - RSA offered no usable authentication methods, going to "
+					+ "NOTENROLLED. attemptResponseCode: " + attemptCode + ", response: " + bodyForLog(fromPost));
 			cleanSS(ns);
 			return Action.goTo(NOTENROLLED).build();
 		}
 
 		// if users only has one MFA choice, go to that choice and start next step after initialize
 		if (choices.size() == 1) {
-			logger.error(loggerPrefix + "startChoice() - single choice auto-selected: " + choices.get(0));
+			logger.debug(loggerPrefix + "startChoice() - single choice auto-selected: " + choices.get(0));
 			ns.putShared("inResponseTo", getDataFromContext(fromPost, "messageId"));
 			ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
 			ns.putShared("p1Choice", choices.get(0));
@@ -248,7 +260,7 @@ public class SecurID extends AbstractDecisionNode {
 		}
 
 		// if here, then user has at least two MFA choice enrolled. We need to let them choose which one
-		logger.error(loggerPrefix + "startChoice() - multiple choices presented, count: " + choices.size());
+		logger.debug(loggerPrefix + "startChoice() - multiple choices presented, count: " + choices.size());
 		List<Callback> callbacks = completeInitialize(ns, choices, fromPost);
 		return Action.send(callbacks).build();
 
@@ -256,7 +268,7 @@ public class SecurID extends AbstractDecisionNode {
 	
 
 	private Action checkApproval(NodeState ns, int step, String theChoice) throws Exception {
-		logger.error(loggerPrefix + "checkApproval() - entry, step: " + step + ", theChoice: " + theChoice);
+		logger.debug(loggerPrefix + "checkApproval() - entry, step: " + step + ", theChoice: " + theChoice);
 		Action retVal = null;
 
 		List<Callback> callbacks = new ArrayList<>();
@@ -271,25 +283,38 @@ public class SecurID extends AbstractDecisionNode {
 		ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
 		ns.putShared("PingReferenceId", getPushRef(fromPost, theChoice));
 
-		if (fromPost.getString("attemptResponseCode")!=null && fromPost.getString("attemptResponseCode").equalsIgnoreCase("SUCCESS")) {// check if fromPost has success
-			logger.error(loggerPrefix + "checkApproval() - SUCCESS, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
+		String attemptCode = fromPost.optString("attemptResponseCode", null);
+		String methodCode = methodResponseCode(fromPost);
+		logger.debug(loggerPrefix + "checkApproval() - attemptResponseCode: " + attemptCode + ", methodResponseCode: "
+				+ methodCode);
+
+		if (attemptCode == null) {
+			logger.error(loggerPrefix + "checkApproval() - no attemptResponseCode in response, going to ERROR. Response: "
+					+ bodyForLog(fromPost));
+			cleanSS(ns);
+			retVal = Action.goTo(ERROR).build();
+		}
+
+		else if (attemptCode.equalsIgnoreCase("SUCCESS")) {// check if fromPost has success
+			logger.debug(loggerPrefix + "checkApproval() - SUCCESS");
 			cleanSS(ns);
 			retVal = Action.goTo(SUCCESS).build();
 
 		}
 
-		else if (fromPost.getString("attemptResponseCode") != null && fromPost.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE") &&
-				 fromPost.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("SUCCESS")) {
-			logger.error(loggerPrefix + "checkApproval() - CHALLENGE with method SUCCESS, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
-			startChoice(fromPost, ns);
+		else if (attemptCode.equalsIgnoreCase("CHALLENGE") && "SUCCESS".equalsIgnoreCase(methodCode)) {
+			// approved, but RSA wants a further method before it will call the attempt done
+			logger.debug(loggerPrefix + "checkApproval() - approved, RSA issued a follow-on challenge");
+			retVal = startChoice(fromPost, ns);
 		}
-		else if (fromPost.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("fail")) {
-			logger.error(loggerPrefix + "checkApproval() - FAILURE, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
+		else if (attemptCode.equalsIgnoreCase("FAIL") || "FAIL".equalsIgnoreCase(methodCode)) {
+			logger.error(loggerPrefix + "checkApproval() - denied. attemptResponseCode: " + attemptCode
+					+ ", methodResponseCode: " + methodCode + ", response: " + bodyForLog(fromPost));
 			cleanSS(ns);
 			retVal = Action.goTo(FAILURE).build();
 		}
 		else {
-			logger.error(loggerPrefix + "checkApproval() - still pending, polling, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
+			logger.debug(loggerPrefix + "checkApproval() - still pending, polling again");
 			if (step == 3) {
 				String url = getQRURL(fromPost);
 				callbacks.add(generateQRCallback(url));
@@ -297,16 +322,135 @@ public class SecurID extends AbstractDecisionNode {
 			PollingWaitCallback pwc = new PollingWaitCallback("5000", config.theWaitingForResponseMessage());
 			callbacks.add(pwc);
 
-			confirmationCancelCallback.setSelectedIndex(100);// so cancel doesnt looked pressed by default
-			callbacks.add(confirmationCancelCallback);
+			ConfirmationCallback cancelCallback = newCancelOnlyCallback();
+			callbacks.add(cancelCallback);
 
-			ns.putShared("confirmationCB", confirmationCancelCallback.getOptions());
+			ns.putShared("confirmationCB", cancelCallback.getOptions());
 			ns.putShared("P1ProtectStep", step);
 
 			retVal = Action.send(callbacks).build();
 		}
 
 		return retVal;
+	}
+
+	/**
+	 * Shared handling for an /authn/verify response that came back from a tokencode prompt
+	 * (P1ProtectStep 1 and 4). RSA can answer in three interesting ways:
+	 *
+	 * <ul>
+	 * <li>{@code SUCCESS} — done.</li>
+	 * <li>{@code CHALLENGE} + method {@code SUCCESS} — the code was accepted but RSA wants
+	 * another method before it will finish. This is how SECURID_NEXT_TOKENCODE and New PIN
+	 * arrive, so hand back to the choice machinery.</li>
+	 * <li>{@code CHALLENGE} + method {@code FAIL} — the code was wrong and RSA is still willing
+	 * to take another attempt, so re-prompt in place.</li>
+	 * </ul>
+	 *
+	 * The last two cases used to be collapsed together and both routed to FAILURE, which meant a
+	 * single mistyped tokencode ended the journey and a Next Tokencode challenge was never shown.
+	 */
+	private Action handleTokenVerifyResult(JSONObject result, NodeState ns, int step) throws Exception {
+		String attemptCode = result.optString("attemptResponseCode", null);
+		String methodCode = methodResponseCode(result);
+		String theChoice = ns.get("p1Choice").asString();
+		logger.debug(loggerPrefix + "handleTokenVerifyResult() - step: " + step + ", p1Choice: " + theChoice
+				+ ", attemptResponseCode: " + attemptCode + ", methodResponseCode: " + methodCode);
+
+		if (attemptCode == null) {
+			logger.error(loggerPrefix + "handleTokenVerifyResult() - no attemptResponseCode in verify response, going "
+					+ "to FAILURE. Response: " + bodyForLog(result));
+			cleanSS(ns);
+			return Action.goTo(FAILURE).build();
+		}
+
+		if (attemptCode.equalsIgnoreCase("SUCCESS")) {
+			logger.debug(loggerPrefix + "handleTokenVerifyResult() - SUCCESS");
+			cleanSS(ns);
+			return Action.goTo(SUCCESS).build();
+		}
+
+		if (attemptCode.equalsIgnoreCase("CHALLENGE") && "SUCCESS".equalsIgnoreCase(methodCode)) {
+			logger.debug(loggerPrefix + "handleTokenVerifyResult() - code accepted, RSA issued a follow-on challenge");
+			return startChoice(result, ns);
+		}
+
+		if (attemptCode.equalsIgnoreCase("CHALLENGE")) {
+			// Wrong code, but the attempt is still open. Ask again rather than failing the journey.
+			// No local retry counter on purpose: RSA owns the retry budget. Once its policy is
+			// exhausted it answers attemptResponseCode FAIL and we fall through to FAILURE below,
+			// and the attempt expires on its own at authnAttemptTimeout regardless.
+			logger.debug(loggerPrefix + "handleTokenVerifyResult() - code rejected, RSA still accepting attempts, "
+					+ "re-prompting for " + theChoice + ". Response: " + bodyForLog(result));
+			return rePromptForTokencode(result, ns, theChoice, step);
+		}
+
+		logger.error(loggerPrefix + "handleTokenVerifyResult() - terminal failure. attemptResponseCode: " + attemptCode
+				+ ", methodResponseCode: " + methodCode + ", response: " + bodyForLog(result));
+		cleanSS(ns);
+		return Action.goTo(FAILURE).build();
+	}
+
+	/**
+	 * Re-send the tokencode prompt for the same choice, staying on the same P1ProtectStep.
+	 */
+	private Action rePromptForTokencode(JSONObject result, NodeState ns, String theChoice, int step) throws Exception {
+		// The next verify has to reference the messageId of THIS response. Leaving the previous
+		// one in state gets the retry rejected as out of sequence, which looks identical to a
+		// wrong tokencode from the journey's point of view.
+		ns.putShared("inResponseTo", getDataFromContext(result, "messageId"));
+		ns.putShared("authnAttemptId", getDataFromContext(result, "authnAttemptId"));
+
+		List<Callback> callbacks = new ArrayList<>();
+		callbacks.add(new PasswordCallback(promptFor(theChoice), true));
+		ConfirmationCallback confirmation = newNextCancelCallback();
+		callbacks.add(confirmation);
+
+		ns.putShared("confirmationCB", confirmation.getOptions());
+		ns.putShared("P1ProtectStep", step);
+
+		return Action.send(callbacks).build();
+	}
+
+	/**
+	 * Label for the tokencode input. RSA gives us a method id, not something worth showing a user,
+	 * so the Next Tokencode case gets its own configurable prompt.
+	 */
+	private String promptFor(String theChoice) {
+		if ("SECURID_NEXT_TOKENCODE".equalsIgnoreCase(theChoice))
+			return config.theNextTokencodePrompt();
+		return theChoice;
+	}
+
+	/**
+	 * {@code methodResponseCode} for the first credential validation result, or null when RSA did
+	 * not send one. {@code getJSONArray} throws on a missing key, and RSA legitimately omits
+	 * {@code credentialValidationResults} on the first challenge of an attempt, so every read of
+	 * this field goes through here.
+	 */
+	private String methodResponseCode(JSONObject fromPost) {
+		if (fromPost == null)
+			return null;
+		JSONArray results = fromPost.optJSONArray("credentialValidationResults");
+		if (results == null || results.length() == 0)
+			return null;
+		JSONObject first = results.optJSONObject(0);
+		if (first == null)
+			return null;
+		return first.optString("methodResponseCode", null);
+	}
+
+	/**
+	 * Response body for a log line, truncated. RSA's initialize/verify responses echo method ids
+	 * and status codes but never the submitted tokencode or PIN, so this is safe to log.
+	 */
+	private String bodyForLog(JSONObject fromPost) {
+		if (fromPost == null)
+			return "<null>";
+		String body = fromPost.toString();
+		if (body.length() <= LOG_BODY_LIMIT)
+			return body;
+		return body.substring(0, LOG_BODY_LIMIT) + "...<truncated, " + body.length() + " chars>";
 	}
 
 	// TODO Need to make these a bit more unique.
@@ -318,16 +462,6 @@ public class SecurID extends AbstractDecisionNode {
 		ns.remove("inResponseTo");
 		ns.remove("authnAttemptId");
 		ns.remove("PingReferenceId");
-	}
-
-	private boolean isMFANeeded(JSONObject fromPost) throws Exception {
-		boolean retVal = true;
-
-		String attemptResponseCode = fromPost.getString("attemptResponseCode");
-		if (attemptResponseCode.equalsIgnoreCase("SUCCESS"))
-			retVal = false;
-
-		return retVal;
 	}
 
 	private boolean cancelPushed(TreeContext context, NodeState ns) {
@@ -358,7 +492,7 @@ public class SecurID extends AbstractDecisionNode {
 		JsonValue theBody = new JsonValue(new LinkedHashMap<String, Object>(1));
 		theBody.put("context", theContextBody);
 		String theChoice = ns.get("p1Choice").asString();
-		logger.error(loggerPrefix + "checkToken() - verifying choice: " + theChoice);
+		logger.debug(loggerPrefix + "checkToken() - verifying choice: " + theChoice);
 
 		String token = "";
 		for (Iterator<? extends Callback> thisIt = context.getAllCallbacks().iterator(); thisIt.hasNext();) {
@@ -394,11 +528,21 @@ public class SecurID extends AbstractDecisionNode {
 			theBody.add("subjectCredentials", getSubCred("SECURID", token));
 		else if (theChoice.equalsIgnoreCase("SECURID_NEXT_TOKENCODE"))
 			theBody.add("subjectCredentials", getSubCred("SECURID_NEXT_TOKENCODE", token));
+		else {
+			// Without a match we would POST a bare context, and RSA answers that with a generic
+			// failure that looks exactly like a wrong tokencode.
+			logger.error(loggerPrefix + "checkToken() - no subjectCredentials mapping for choice: " + theChoice);
+			throw new NodeProcessException("No RSA credential mapping for choice: " + theChoice);
+		}
+
+		// Length only. The tokencode itself must never reach a log.
+		logger.debug(loggerPrefix + "checkToken() - submitting " + token.length() + " character code for " + theChoice);
 
 		post.setEntity(new StringEntity(theBody.toString()));
 
 		JSONObject jo = doPost(post);
-		logger.error(loggerPrefix + "checkToken() - doPost returned, attemptResponseCode: " + jo.getString("attemptResponseCode"));
+		logger.debug(loggerPrefix + "checkToken() - doPost returned, attemptResponseCode: "
+				+ jo.optString("attemptResponseCode", null) + ", methodResponseCode: " + methodResponseCode(jo));
 		return jo;
 	}
 
@@ -415,7 +559,7 @@ public class SecurID extends AbstractDecisionNode {
 				JsonValue jv = ns.get("P1choices");
 				List<String> theList = jv.asList(String.class);
 				theChoice = theList.get(cb.getSelectedIndexes()[0]);
-				logger.error(loggerPrefix + "choiceSelected() - user selected choice: " + theChoice);
+				logger.debug(loggerPrefix + "choiceSelected() - user selected choice: " + theChoice);
 				ns.remove("P1choices");
 				ns.putShared("p1Choice", theChoice);
 				callbacks = choiceSelectedHelper(theChoice, ns);
@@ -426,7 +570,7 @@ public class SecurID extends AbstractDecisionNode {
 	}
 
 	private List<Callback> choiceSelectedHelper(String theChoice, NodeState ns) throws Exception {
-		logger.error(loggerPrefix + "choiceSelectedHelper() - routing choice: " + theChoice);
+		logger.debug(loggerPrefix + "choiceSelectedHelper() - routing choice: " + theChoice);
 		List<Callback> callbacks = new ArrayList<>();
 		switch (theChoice) {
 		case "RSA SecurID":
@@ -437,39 +581,47 @@ public class SecurID extends AbstractDecisionNode {
 		case "SECURID":
 		case "SECURID_NEXT_TOKENCODE":
 			// need to show them an input screen
-			logger.error(loggerPrefix + "choiceSelectedHelper() - entering tokencode input path for choice: " + theChoice);
-			String promptLabel = theChoice.equals("SECURID_NEXT_TOKENCODE") ? "Next Tokencode" : theChoice;
-			PasswordCallback pc = new PasswordCallback(promptLabel, true);
+			logger.debug(loggerPrefix + "choiceSelectedHelper() - entering tokencode input path for choice: " + theChoice);
+			PasswordCallback pc = new PasswordCallback(promptFor(theChoice), true);
+			ConfirmationCallback tokencodeConfirmation = newNextCancelCallback();
 			callbacks.add(pc);
-			callbacks.add(confirmationCallback);
+			callbacks.add(tokencodeConfirmation);
 			ns.putShared("P1ProtectStep", 1);
-			ns.putShared("confirmationCB", confirmationCallback.getOptions());
+			ns.putShared("confirmationCB", tokencodeConfirmation.getOptions());
 			break;
 		case "Device Biometrics":
 		case "Approve":
-			logger.error(loggerPrefix + "choiceSelectedHelper() - entering push/biometrics path for choice: " + theChoice);
+			logger.debug(loggerPrefix + "choiceSelectedHelper() - entering push/biometrics path for choice: " + theChoice);
 			callbacks.addAll(pushSetup(theChoice, ns, 2));
 			break;
 		case "QR Code":
 			// need to show them a QR code and a wait till done
-			logger.error(loggerPrefix + "choiceSelectedHelper() - entering QR code path for choice: " + theChoice);
+			logger.debug(loggerPrefix + "choiceSelectedHelper() - entering QR code path for choice: " + theChoice);
 			callbacks.addAll(pushSetup(theChoice, ns, 3));
 			break;
 
 		case "Voice Tokencode":
 		case "SMS Tokencode":
-			logger.error(loggerPrefix + "choiceSelectedHelper() - entering voice/SMS path for choice: " + theChoice);
+			logger.debug(loggerPrefix + "choiceSelectedHelper() - entering voice/SMS path for choice: " + theChoice);
 			callbacks.addAll(vOrSSetup(theChoice, ns, 4));
 			break;
+
+		default:
+			// Falling through here used to return an empty callback list, and Action.send() with
+			// nothing in it fails further downstream with no hint as to why. Name the method
+			// instead so the log says which RSA method id we do not handle.
+			logger.error(loggerPrefix + "choiceSelectedHelper() - unhandled RSA authentication method: " + theChoice);
+			throw new NodeProcessException("Unhandled RSA authentication method: " + theChoice);
 		}
 		return callbacks;
 	}
 	
 	private List<Callback> vOrSSetup(String theChoice, NodeState ns, int step) throws Exception{
-		logger.error(loggerPrefix + "vOrSSetup() - entry, theChoice: " + theChoice + ", step: " + step);
+		logger.debug(loggerPrefix + "vOrSSetup() - entry, theChoice: " + theChoice + ", step: " + step);
 		List<Callback> callbacks = new ArrayList<>();
 
-		ns.putShared("confirmationCB", confirmationCallback.getOptions());
+		ConfirmationCallback confirmation = newNextCancelCallback();
+		ns.putShared("confirmationCB", confirmation.getOptions());
 		ns.putShared("P1ProtectStep", step);
 		HttpPost post = new HttpPost(config.baseURL() + verifyAppend);
 		JsonValue theContextBody = getContext(ns.get("inResponseTo").asString(), ns.get("authnAttemptId").asString());
@@ -485,23 +637,26 @@ public class SecurID extends AbstractDecisionNode {
 		post.setEntity(new StringEntity(theBody.toString()));
 		// Send init call to SecurID
 		JSONObject fromPost = doPost(post);
-		logger.error(loggerPrefix + "vOrSSetup() - doPost returned, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
+		logger.debug(loggerPrefix + "vOrSSetup() - doPost returned, attemptResponseCode: "
+				+ fromPost.optString("attemptResponseCode", null) + ", methodResponseCode: "
+				+ methodResponseCode(fromPost));
 		ns.putShared("inResponseTo", getDataFromContext(fromPost, "messageId"));
 		ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
-		
+
 		//StringAttributeInputCallback tokenCode = new StringAttributeInputCallback("smsvoiceToken", theChoice, null, true);
 		PasswordCallback pc = new PasswordCallback(theChoice, true);
-		
+
 		callbacks.add(pc);
-		callbacks.add(confirmationCallback);
+		callbacks.add(confirmation);
 		return callbacks;
 	}
 
 	private List<Callback> pushSetup(String theChoice, NodeState ns, int step) throws Exception {
-		logger.error(loggerPrefix + "pushSetup() - entry, theChoice: " + theChoice + ", step: " + step);
+		logger.debug(loggerPrefix + "pushSetup() - entry, theChoice: " + theChoice + ", step: " + step);
 		List<Callback> callbacks = new ArrayList<>();
 
-		ns.putShared("confirmationCB", confirmationCancelCallback.getOptions());
+		ConfirmationCallback cancelCallback = newCancelOnlyCallback();
+		ns.putShared("confirmationCB", cancelCallback.getOptions());
 		ns.putShared("P1ProtectStep", step);
 		JsonValue refJV = ns.get("PingReferenceId");
 		String ref = null;
@@ -509,7 +664,9 @@ public class SecurID extends AbstractDecisionNode {
 			ref = refJV.asString();
 		}
 		JSONObject fromPost = makePushPost(ns, theChoice, ref);
-		logger.error(loggerPrefix + "pushSetup() - makePushPost returned, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
+		logger.debug(loggerPrefix + "pushSetup() - makePushPost returned, attemptResponseCode: "
+				+ fromPost.optString("attemptResponseCode", null) + ", methodResponseCode: "
+				+ methodResponseCode(fromPost));
 		ns.putShared("inResponseTo", getDataFromContext(fromPost, "messageId"));
 		ns.putShared("authnAttemptId", getDataFromContext(fromPost, "authnAttemptId"));
 		ns.putShared("PingReferenceId", getPushRef(fromPost, theChoice));
@@ -520,29 +677,67 @@ public class SecurID extends AbstractDecisionNode {
 		}
 		PollingWaitCallback pwc = new PollingWaitCallback("5000", config.theWaitingForResponseMessage());
 		callbacks.add(pwc);
-		confirmationCancelCallback.setSelectedIndex(100);// so cancel doesnt looked pressed by default
-		callbacks.add(confirmationCancelCallback);
+		callbacks.add(cancelCallback);
 
 		return callbacks;
 	}
 
+	/**
+	 * referenceId for the in-flight push/QR challenge, or "" if there isn't one. Every level of
+	 * this structure is optional: a terminal response (SUCCESS or FAIL) carries no
+	 * challengeMethods at all, and this is called before we know which kind of response we got.
+	 */
 	private String getPushRef(JSONObject fromPost, String theChoice) {
 		String retVal = "";
 
-		JSONArray theChallenges = fromPost.getJSONObject("challengeMethods").getJSONArray("challenges");
+		JSONObject challengeMethods = fromPost.optJSONObject("challengeMethods");
+		if (challengeMethods == null)
+			return retVal;
+		JSONArray theChallenges = challengeMethods.optJSONArray("challenges");
+		if (theChallenges == null)
+			return retVal;
+
 		for (int i = 0; i < theChallenges.length(); i++) {
-			JSONObject thisJO = theChallenges.getJSONObject(i).getJSONArray("requiredMethods").getJSONObject(0);
-			String name = thisJO.getString("displayName");
-			if (name.equalsIgnoreCase(theChoice)) {
-				retVal = thisJO.getJSONArray("versions").getJSONObject(0).getString("referenceId");
+			JSONObject thisChallenge = theChallenges.optJSONObject(i);
+			if (thisChallenge == null)
+				continue;
+			JSONArray requiredMethods = thisChallenge.optJSONArray("requiredMethods");
+			if (requiredMethods == null || requiredMethods.length() == 0)
+				continue;
+			JSONObject thisJO = requiredMethods.optJSONObject(0);
+			if (thisJO == null)
+				continue;
+			// displayName is null for some methods, in which case methodId is what we matched on
+			// when we built the choice list, so match on it here too.
+			String name = thisJO.optString("displayName", null);
+			if (name == null)
+				name = thisJO.optString("methodId", null);
+			if (name == null || !name.equalsIgnoreCase(theChoice))
+				continue;
+
+			JSONArray versions = thisJO.optJSONArray("versions");
+			if (versions == null || versions.length() == 0)
 				break;
-			}
+			retVal = versions.getJSONObject(0).optString("referenceId", "");
+			break;
 		}
+		if (retVal.isEmpty())
+			logger.debug(loggerPrefix + "getPushRef() - no referenceId found for choice: " + theChoice);
 		return retVal;
 	}
 
 	private String getQRURL(JSONObject fromPost) {
-		return fromPost.getJSONArray("credentialValidationResults").getJSONObject(0).getJSONArray("authnAttributes").getJSONObject(0).getString("value");
+		JSONArray results = fromPost.optJSONArray("credentialValidationResults");
+		if (results == null || results.length() == 0) {
+			logger.error(loggerPrefix + "getQRURL() - no credentialValidationResults in response: " + bodyForLog(fromPost));
+			return "";
+		}
+		JSONArray authnAttributes = results.getJSONObject(0).optJSONArray("authnAttributes");
+		if (authnAttributes == null || authnAttributes.length() == 0) {
+			logger.error(loggerPrefix + "getQRURL() - no authnAttributes in response: " + bodyForLog(fromPost));
+			return "";
+		}
+		return authnAttributes.getJSONObject(0).optString("value", "");
 	}
 
 	private Callback generateQRCallback(String text) {
@@ -621,7 +816,9 @@ public class SecurID extends AbstractDecisionNode {
 
 		// Send init call to SecurID
 		JSONObject fromPost = doPost(post);
-		logger.error(loggerPrefix + "doInitialize() - doPost returned, attemptResponseCode: " + fromPost.getString("attemptResponseCode"));
+		logger.debug(loggerPrefix + "doInitialize() - doPost returned for subject '" + username
+				+ "', attemptResponseCode: " + fromPost.optString("attemptResponseCode", null)
+				+ ", methodResponseCode: " + methodResponseCode(fromPost));
 		return fromPost;
 
 	}
@@ -639,9 +836,10 @@ public class SecurID extends AbstractDecisionNode {
 		ChoiceCallback cc = new ChoiceCallback(config.thePrompt(), Arrays.copyOf(choices.toArray(), choices.size(), String[].class), 0, false);
 		// ConfirmationCallback confirmationCallback = new ConfirmationCallback(ConfirmationCallback.INFORMATION, new String[]{"Next", "Cancel"}, 0);
 
+		ConfirmationCallback confirmation = newNextCancelCallback();
 		callbacks.add(cc);
-		callbacks.add(confirmationCallback);
-		ns.putShared("confirmationCB", confirmationCallback.getOptions());
+		callbacks.add(confirmation);
+		ns.putShared("confirmationCB", confirmation.getOptions());
 		return callbacks;
 	}
 
@@ -672,9 +870,19 @@ public class SecurID extends AbstractDecisionNode {
 		return contextBody;
 	}
 
-	private String getDataFromContext(JSONObject data, String key) {
-		JSONObject theContext = data.getJSONObject("context");
-		String returnValue = theContext.getString(key);
+	private String getDataFromContext(JSONObject data, String key) throws NodeProcessException {
+		JSONObject theContext = data.optJSONObject("context");
+		if (theContext == null) {
+			logger.error(loggerPrefix + "getDataFromContext() - RSA response carries no context object, so the attempt "
+					+ "cannot be continued. Response: " + bodyForLog(data));
+			throw new NodeProcessException("RSA response contained no context object");
+		}
+		String returnValue = theContext.optString(key, null);
+		if (returnValue == null) {
+			logger.error(loggerPrefix + "getDataFromContext() - RSA response context carries no '" + key
+					+ "'. Context: " + bodyForLog(theContext));
+			throw new NodeProcessException("RSA response context contained no " + key);
+		}
 		return returnValue;
 	}
 
@@ -703,12 +911,16 @@ public class SecurID extends AbstractDecisionNode {
 			}
 
 			HttpResponse response = httpClient.execute(post);
-			logger.error(loggerPrefix + "doPost() - URL: " + post.getURI().toString() + ", HTTP status: " + response.getStatusLine().getStatusCode());
+			logger.debug(loggerPrefix + "doPost() - URL: " + post.getURI().toString() + ", HTTP status: " + response.getStatusLine().getStatusCode());
 
 			HttpEntity entity = response.getEntity();
 			String content = EntityUtils.toString(entity);
 
 			retVal = new JSONObject(content);
+			// Debug-gated, and RSA never echoes the submitted tokencode or PIN. Without this the
+			// only thing a failed authentication leaves behind is a bare response code, which is
+			// not enough to tell a wrong code from a method the user has no credential for.
+			logger.debug(loggerPrefix + "doPost() - response body: " + bodyForLog(retVal));
 
 		} catch (Exception e) {
 			throw new Exception(e.fillInStackTrace());
@@ -730,25 +942,54 @@ public class SecurID extends AbstractDecisionNode {
 		ArrayList<String> retVal = new ArrayList<String>();
 		int priority = 2;
 
-		JSONArray theChallenges = fromPost.getJSONObject("challengeMethods").getJSONArray("challenges");
+		JSONObject challengeMethods = fromPost.optJSONObject("challengeMethods");
+		if (challengeMethods == null) {
+			logger.debug(loggerPrefix + "getChoices() - response has no challengeMethods object");
+			return retVal;
+		}
+		JSONArray theChallenges = challengeMethods.optJSONArray("challenges");
+		if (theChallenges == null) {
+			logger.debug(loggerPrefix + "getChoices() - challengeMethods has no challenges array");
+			return retVal;
+		}
 
 		// TODO Filter and add choices of only ones we support
 		for (int i = 0; i < theChallenges.length(); i++) {
 
-			JSONObject thisJO = theChallenges.getJSONObject(i).getJSONArray("requiredMethods").getJSONObject(0);
-			JSONArray methAttr = thisJO.getJSONArray("versions").getJSONObject(0).getJSONArray("methodAttributes");
+			JSONObject thisChallenge = theChallenges.optJSONObject(i);
+			JSONArray requiredMethods = thisChallenge == null ? null : thisChallenge.optJSONArray("requiredMethods");
+			if (requiredMethods == null || requiredMethods.length() == 0) {
+				logger.debug(loggerPrefix + "getChoices() - challenge " + i + " has no requiredMethods, skipping");
+				continue;
+			}
+			JSONObject thisJO = requiredMethods.getJSONObject(0);
 
-			if (methAttr != null && methAttr.length() > 0 && methAttr.getJSONObject(0).getString("name").equalsIgnoreCase("METHOD_NOT_APPLICABLE")) {
-				// do nothing
+			// versions and methodAttributes are both optional -- getJSONArray() throws on a
+			// missing key, which used to take out the whole initialize response and surface as
+			// ERROR rather than as the method simply being unavailable.
+			JSONArray versions = thisJO.optJSONArray("versions");
+			JSONArray methAttr = null;
+			if (versions != null && versions.length() > 0)
+				methAttr = versions.getJSONObject(0).optJSONArray("methodAttributes");
+
+			if (methAttr != null && methAttr.length() > 0
+					&& "METHOD_NOT_APPLICABLE".equalsIgnoreCase(methAttr.getJSONObject(0).optString("name", null))) {
+				// RSA is telling us this method exists but the user cannot use it right now
+				logger.debug(loggerPrefix + "getChoices() - skipping METHOD_NOT_APPLICABLE method: "
+						+ thisJO.optString("methodId", "<no methodId>"));
 			} else {
-				String thisOne = "";
-				if (thisJO.get("displayName")!=JSONObject.NULL) {
-					thisOne = thisJO.getString("displayName");
+				// displayName comes back as JSON null for the SECURID_* methods, in which case the
+				// methodId is the only label we have -- that is why the choice a user sees for
+				// next tokencode is literally "SECURID_NEXT_TOKENCODE".
+				String thisOne = thisJO.optString("displayName", null);
+				if (thisOne == null)
+					thisOne = thisJO.optString("methodId", null);
+				if (thisOne == null) {
+					logger.debug(loggerPrefix + "getChoices() - challenge " + i + " has neither displayName nor "
+							+ "methodId, skipping");
+					continue;
 				}
-				else {
-					thisOne = thisJO.getString("methodId");
-				}
-				
+
 				if (!retVal.contains(thisOne) && 
 					(thisOne.equalsIgnoreCase("RSA SecurID") ||
 					thisOne.equalsIgnoreCase("Authenticate Tokencode") ||
@@ -762,25 +1003,33 @@ public class SecurID extends AbstractDecisionNode {
 					thisOne.equalsIgnoreCase("SECURID_NEWPIN") ||
 					thisOne.equalsIgnoreCase("SECURID") ||
 					thisOne.equalsIgnoreCase("SECURID_NEXT_TOKENCODE"))) {
-					if (retVal.size()>0 && thisJO.get("priority")!=JSONObject.NULL) {
-						//need to put higher priority first 
+					boolean hasPriority = thisJO.has("priority") && !thisJO.isNull("priority");
+					if (retVal.size()>0 && hasPriority) {
+						//need to put higher priority first
 						int thisPriority = thisJO.getInt("priority");
-						
+
 						if (thisPriority < priority) {
 							thisOne = retVal.set(0, thisOne);
 							priority = thisPriority;
 						}
 					}
-					else if (thisJO.get("priority")!=JSONObject.NULL){
+					else if (hasPriority){
 						priority = thisJO.getInt("priority");
 					}
 					retVal.add(thisOne);
-					logger.error(loggerPrefix + "getChoices() - added eligible choice: " + thisOne);
+					logger.debug(loggerPrefix + "getChoices() - added eligible choice: " + thisOne);
+				} else if (retVal.contains(thisOne)) {
+					logger.debug(loggerPrefix + "getChoices() - duplicate choice, already present: " + thisOne);
+				} else {
+					// RSA offered a method this node has no callback path for. Worth logging by
+					// name: an all-unsupported list is what produces a NOTENROLLED outcome, and
+					// without this the reason is invisible.
+					logger.debug(loggerPrefix + "getChoices() - RSA offered an unsupported method, ignoring: " + thisOne);
 				}
 			}
 
 		}
-		logger.error(loggerPrefix + "getChoices() - total eligible choices found: " + retVal.size());
+		logger.debug(loggerPrefix + "getChoices() - total eligible choices found: " + retVal.size() + " " + retVal);
 		return retVal;
 	}
 
