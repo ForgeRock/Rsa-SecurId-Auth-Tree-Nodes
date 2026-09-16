@@ -192,7 +192,7 @@ public class SecurID extends AbstractDecisionNode {
 			}
 
 		} catch (Exception ex) {
-			String stackTrace = org.apache.commons.lang.exception.ExceptionUtils.getStackTrace(ex);
+			String stackTrace = org.apache.commons.lang3.exception.ExceptionUtils.getStackTrace(ex);
 			cleanSS(context.getStateFor(this));
 			logger.error(loggerPrefix + "Exception occurred: " + stackTrace);
 			context.getStateFor(this).putTransient(loggerPrefix + "Exception", new Date() + ": " + ex.getMessage());
