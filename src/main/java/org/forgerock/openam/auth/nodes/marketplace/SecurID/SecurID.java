@@ -111,6 +111,11 @@ public class SecurID extends AbstractDecisionNode {
 			return "Waiting for your response";
 		}
 
+		@Attribute(order = 800, validators = { RequiredValueValidator.class })
+		default String theNextTokencodePrompt() {
+			return "Wait for the code on your token to change, then enter the new code";
+		}
+
 	}
 
 	@Inject
@@ -156,6 +161,19 @@ public class SecurID extends AbstractDecisionNode {
 					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE")&& 
 							result.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("SUCCESS")) {
 						return startChoice(result, ns);
+					}
+					else if (result.getString("attemptResponseCode") != null && result.getString("attemptResponseCode").equalsIgnoreCase("CHALLENGE") &&
+							result.getJSONArray("credentialValidationResults").getJSONObject(0).getString("methodResponseCode").equalsIgnoreCase("FAIL")) {
+						// wrong tokencode, but RSA is still accepting attempts -- re-prompt in place
+						ns.putShared("inResponseTo", getDataFromContext(result, "messageId"));
+						ns.putShared("authnAttemptId", getDataFromContext(result, "authnAttemptId"));
+						String theChoice = ns.get("p1Choice").asString();
+						String prompt = theChoice.equalsIgnoreCase("SECURID_NEXT_TOKENCODE") ? config.theNextTokencodePrompt() : theChoice;
+						List<Callback> retryCallbacks = new ArrayList<>();
+						retryCallbacks.add(new PasswordCallback(prompt, true));
+						retryCallbacks.add(confirmationCallback);
+						ns.putShared("confirmationCB", confirmationCallback.getOptions());
+						return Action.send(retryCallbacks).build();
 					}
 					else {
 						// TODO if here, then they failed token match. Give another chance? For now, I'm sending to failure
@@ -368,6 +386,8 @@ public class SecurID extends AbstractDecisionNode {
 			theBody.add("subjectCredentials", getSubCred("SECURID_NEWPIN", token));
 		else if (theChoice.equalsIgnoreCase("SECURID"))
 			theBody.add("subjectCredentials", getSubCred("SECURID", token));
+		else if (theChoice.equalsIgnoreCase("SECURID_NEXT_TOKENCODE"))
+			theBody.add("subjectCredentials", getSubCred("SECURID_NEXT_TOKENCODE", token));
 
 		post.setEntity(new StringEntity(theBody.toString()));
 
@@ -406,8 +426,10 @@ public class SecurID extends AbstractDecisionNode {
 		case "RSA SecurID New PIN":
 		case "SECURID_NEWPIN":
 		case "SECURID":
+		case "SECURID_NEXT_TOKENCODE":
 			// need to show them an input screen
-			PasswordCallback pc = new PasswordCallback(theChoice, true);
+			String prompt = theChoice.equalsIgnoreCase("SECURID_NEXT_TOKENCODE") ? config.theNextTokencodePrompt() : theChoice;
+			PasswordCallback pc = new PasswordCallback(prompt, true);
 			callbacks.add(pc);
 			callbacks.add(confirmationCallback);
 			ns.putShared("P1ProtectStep", 1);
@@ -533,7 +555,7 @@ public class SecurID extends AbstractDecisionNode {
 		theMethMap.put("methodId", methodId);
 		JSONArray subCreds = new JSONArray();
 
-		if (methodId.equalsIgnoreCase("EMERGENCY_TOKENCODE") || methodId.equalsIgnoreCase("SECURID") || methodId.equalsIgnoreCase("TOKEN") || methodId.equalsIgnoreCase("SMS") || methodId.equalsIgnoreCase("VOICE") ||  methodId.equalsIgnoreCase("SECURID_NEW_PIN") ||  methodId.equalsIgnoreCase("SECURID_NEWPIN")) {
+		if (methodId.equalsIgnoreCase("EMERGENCY_TOKENCODE") || methodId.equalsIgnoreCase("SECURID") || methodId.equalsIgnoreCase("TOKEN") || methodId.equalsIgnoreCase("SMS") || methodId.equalsIgnoreCase("VOICE") ||  methodId.equalsIgnoreCase("SECURID_NEW_PIN") ||  methodId.equalsIgnoreCase("SECURID_NEWPIN") || methodId.equalsIgnoreCase("SECURID_NEXT_TOKENCODE")) {
 			Map<String, Object> contextBody = new LinkedHashMap<String, Object>(1);
 			contextBody.put("name", methodId);
 			contextBody.put("value", value);
@@ -694,13 +716,13 @@ public class SecurID extends AbstractDecisionNode {
 		for (int i = 0; i < theChallenges.length(); i++) {
 
 			JSONObject thisJO = theChallenges.getJSONObject(i).getJSONArray("requiredMethods").getJSONObject(0);
-			JSONArray methAttr = thisJO.getJSONArray("versions").getJSONObject(0).getJSONArray("methodAttributes");
+			JSONArray methAttr = thisJO.getJSONArray("versions").getJSONObject(0).optJSONArray("methodAttributes");
 
 			if (methAttr != null && methAttr.length() > 0 && methAttr.getJSONObject(0).getString("name").equalsIgnoreCase("METHOD_NOT_APPLICABLE")) {
 				// do nothing
 			} else {
 				String thisOne = "";
-				if (thisJO.get("displayName")!=JSONObject.NULL) {
+				if (!thisJO.isNull("displayName")) {
 					thisOne = thisJO.getString("displayName");
 				}
 				else {
@@ -718,8 +740,9 @@ public class SecurID extends AbstractDecisionNode {
 					thisOne.equalsIgnoreCase("Voice Tokencode") ||
 					thisOne.equalsIgnoreCase("SMS Tokencode") ||
 					thisOne.equalsIgnoreCase("SECURID_NEWPIN") ||
-					thisOne.equalsIgnoreCase("SECURID"))) {
-					if (retVal.size()>0 && thisJO.get("priority")!=JSONObject.NULL) {
+					thisOne.equalsIgnoreCase("SECURID") ||
+					thisOne.equalsIgnoreCase("SECURID_NEXT_TOKENCODE"))) {
+					if (retVal.size()>0 && !thisJO.isNull("priority")) {
 						//need to put higher priority first 
 						int thisPriority = thisJO.getInt("priority");
 						
@@ -728,7 +751,7 @@ public class SecurID extends AbstractDecisionNode {
 							priority = thisPriority;
 						}
 					}
-					else if (thisJO.get("priority")!=JSONObject.NULL){
+					else if (!thisJO.isNull("priority")){
 						priority = thisJO.getInt("priority");
 					}
 					retVal.add(thisOne);
